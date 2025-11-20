@@ -1,29 +1,31 @@
 package com.manictime.android
 
 import android.graphics.Bitmap
+import android.util.Base64
 import android.util.Log
-import com.jcraft.jsch.ChannelSftp
-import com.jcraft.jsch.JSch
-import com.jcraft.jsch.Session
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
-import java.io.ByteArrayInputStream
+import org.json.JSONObject
+import java.io.BufferedReader
 import java.io.ByteArrayOutputStream
 import java.io.File
+import java.io.InputStreamReader
+import java.io.OutputStreamWriter
+import java.net.HttpURLConnection
+import java.net.URL
 import java.text.SimpleDateFormat
 import java.util.*
 
 /**
- * 截图上传工具 - 通过SFTP直接上传到服务器文件系统
+ * 截图上传工具 - 通过HTTP API上传到服务器
  */
 class ScreenshotUploader(
     private val prefs: ManicTimePreferences
 ) {
     companion object {
         const val TAG = "ScreenshotUploader"
-        private const val SSH_PORT = 22
-        private const val USER_ID = "1"  // ManicTime用户ID
-        private const val BASE_PATH = "/root/ManicTimeServer/manictimeserver/Data/Screenshots"
+        private const val UPLOAD_PORT = 8888
+        private const val UPLOAD_TOKEN = "kXgZGAQyVVyrwwlgRSi2RjfT-8mOpSga8EvRqzAucXw"
         
         // 日期格式
         private val dateFormat = SimpleDateFormat("yyyy-MM-dd", Locale.US)
@@ -64,11 +66,8 @@ class ScreenshotUploader(
             val date = Date(timestamp)
             val deviceUUID = prefs.deviceUUID
             
-            // 构建路径: /Screenshots/{userId}/{deviceUUID}/{date}/
-            val dateStr = dateFormat.format(date)
-            val remotePath = "$BASE_PATH/$USER_ID/$deviceUUID/$dateStr"
-            
             // 生成文件名
+            val dateStr = dateFormat.format(date)
             val timeStr = timeFormat.format(date)
             val timezoneStr = timezoneFormat.format(date).replace(":", "-")  // +08:00 -> +08-00
             val width = bitmap.width
@@ -79,15 +78,15 @@ class ScreenshotUploader(
             val filename = "${dateStr}_${timeStr}_${timezoneStr}_${width}_${height}_${uniqueId}_${flag}.jpg"
             val thumbnailFilename = "${dateStr}_${timeStr}_${timezoneStr}_${width}_${height}_${uniqueId}_${flag}.thumbnail.jpg"
             
-            Log.d(TAG, "准备上传截图: $remotePath/$filename")
+            Log.d(TAG, "准备上传截图: $filename")
             
             // 压缩图片
             val fullImage = compressBitmap(bitmap, 85)
             val thumbnail = createThumbnail(bitmap)
             
             // 上传到服务器
-            uploadToSFTP(remotePath, filename, fullImage)
-            uploadToSFTP(remotePath, thumbnailFilename, thumbnail)
+            uploadToHTTP(deviceUUID, timestamp, dateStr, filename, fullImage)
+            uploadToHTTP(deviceUUID, timestamp, dateStr, thumbnailFilename, thumbnail)
             
             Log.d(TAG, "✅ 截图上传成功: $filename")
             true
@@ -123,65 +122,57 @@ class ScreenshotUploader(
     }
     
     /**
-     * 通过SFTP上传文件
+     * 通过HTTP API上传文件
      */
-    private fun uploadToSFTP(remotePath: String, filename: String, data: ByteArray) {
-        var session: Session? = null
-        var channel: ChannelSftp? = null
+    private fun uploadToHTTP(
+        deviceUUID: String,
+        timestamp: Long,
+        dateStr: String,
+        filename: String,
+        data: ByteArray
+    ) {
+        // 从serverUrl提取主机名
+        val host = prefs.serverUrl
+            .replace("http://", "")
+            .replace("https://", "")
+            .split(":")[0]
+        
+        val url = URL("http://$host:$UPLOAD_PORT/upload")
+        val connection = url.openConnection() as HttpURLConnection
         
         try {
-            // 从serverUrl提取主机名
-            val host = prefs.serverUrl
-                .replace("http://", "")
-                .replace("https://", "")
-                .split(":")[0]
+            connection.requestMethod = "POST"
+            connection.setRequestProperty("Content-Type", "application/json")
+            connection.setRequestProperty("Authorization", "Bearer $UPLOAD_TOKEN")
+            connection.doOutput = true
+            connection.connectTimeout = 30000
+            connection.readTimeout = 30000
             
-            // 创建SSH连接
-            val jsch = JSch()
-            session = jsch.getSession("root", host, SSH_PORT)
-            session.setPassword(prefs.password)  // 使用ManicTime的密码
-            
-            // 跳过主机密钥检查（生产环境应该验证）
-            val config = Properties()
-            config["StrictHostKeyChecking"] = "no"
-            session.setConfig(config)
-            
-            session.connect(10000)
-            
-            // 打开SFTP通道
-            channel = session.openChannel("sftp") as ChannelSftp
-            channel.connect(5000)
-            
-            // 创建目录（如果不存在）
-            createRemoteDirectory(channel, remotePath)
-            
-            // 上传文件
-            channel.cd(remotePath)
-            channel.put(ByteArrayInputStream(data), filename)
-            
-            Log.d(TAG, "SFTP上传成功: $remotePath/$filename (${data.size / 1024}KB)")
-        } finally {
-            channel?.disconnect()
-            session?.disconnect()
-        }
-    }
-    
-    /**
-     * 递归创建远程目录
-     */
-    private fun createRemoteDirectory(channel: ChannelSftp, path: String) {
-        val dirs = path.split("/").filter { it.isNotEmpty() }
-        var currentPath = ""
-        
-        for (dir in dirs) {
-            currentPath += "/$dir"
-            try {
-                channel.cd(currentPath)
-            } catch (e: Exception) {
-                // 目录不存在，创建它
-                channel.mkdir(currentPath)
-                channel.cd(currentPath)
+            // 构建JSON请求
+            val base64Data = Base64.encodeToString(data, Base64.NO_WRAP)
+            val json = JSONObject().apply {
+                put("deviceUUID", deviceUUID)
+                put("timestamp", timestamp)
+                put("date", dateStr)
+                put("filename", filename)
+                put("imageData", base64Data)
             }
+            
+            // 发送请求
+            OutputStreamWriter(connection.outputStream, "UTF-8").use { writer ->
+                writer.write(json.toString())
+                writer.flush()
+            }
+            
+            val responseCode = connection.responseCode
+            if (responseCode == HttpURLConnection.HTTP_OK) {
+                Log.d(TAG, "HTTP上传成功: $filename (${data.size / 1024}KB)")
+            } else {
+                val error = BufferedReader(InputStreamReader(connection.errorStream)).use { it.readText() }
+                throw Exception("HTTP $responseCode: $error")
+            }
+        } finally {
+            connection.disconnect()
         }
     }
 }
