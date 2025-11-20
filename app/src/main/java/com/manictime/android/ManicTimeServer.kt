@@ -4,25 +4,12 @@ import android.app.*
 import android.app.usage.UsageStatsManager
 import android.content.Context
 import android.content.Intent
-import android.graphics.Bitmap
-import android.graphics.PixelFormat
-import android.hardware.display.DisplayManager
-import android.hardware.display.VirtualDisplay
-import android.media.Image
-import android.media.ImageReader
-import android.media.projection.MediaProjection
-import android.media.projection.MediaProjectionManager
 import android.os.Build
-import android.os.Handler
 import android.os.IBinder
-import android.os.Looper
-import android.util.DisplayMetrics
 import android.util.Log
-import android.view.WindowManager
 import androidx.core.app.NotificationCompat
 import kotlinx.coroutines.*
-import java.io.ByteArrayOutputStream
-import java.util.*
+import java.io.File
 
 /**
  * ManicTime 前台服务
@@ -62,12 +49,7 @@ class ManicTimeService : Service() {
     private var lastActivityTime = 0L
     
     // 截图相关
-    private var mediaProjection: MediaProjection? = null
-    private var virtualDisplay: VirtualDisplay? = null
-    private var imageReader: ImageReader? = null
     private var screenshotJob: Job? = null
-    private var screenshotResultCode: Int = 0
-    private var screenshotResultData: Intent? = null
     
     // 数据缓存
     private val activityQueue = mutableListOf<ActivityRecord>()
@@ -96,11 +78,6 @@ class ManicTimeService : Service() {
                 startForeground(NOTIFICATION_ID, createNotification("正在运行"))
                 startMonitoring()
             }
-            ACTION_START_SCREENSHOT -> {
-                screenshotResultCode = intent.getIntExtra(EXTRA_RESULT_CODE, -1)
-                screenshotResultData = intent.getParcelableExtra(EXTRA_RESULT_DATA)
-                startScreenshotCapture()
-            }
             ACTION_STOP -> {
                 stopMonitoring()
                 stopSelf()
@@ -115,9 +92,52 @@ class ManicTimeService : Service() {
     override fun onDestroy() {
         super.onDestroy()
         Log.d(TAG, "Service onDestroy")
+        
+        // 如果启用了自动启动，则重启服务
+        if (prefs.autoStartEnabled) {
+            Log.d(TAG, "服务被销毁，准备重启")
+            val restartIntent = Intent(applicationContext, ManicTimeService::class.java).apply {
+                action = ACTION_START
+            }
+            
+            // 使用PendingIntent延迟重启
+            val pendingIntent = PendingIntent.getService(
+                applicationContext,
+                0,
+                restartIntent,
+                PendingIntent.FLAG_ONE_SHOT or PendingIntent.FLAG_IMMUTABLE
+            )
+            
+            val alarmManager = getSystemService(Context.ALARM_SERVICE) as AlarmManager
+            alarmManager.set(
+                AlarmManager.RTC_WAKEUP,
+                System.currentTimeMillis() + 1000, // 1秒后重启
+                pendingIntent
+            )
+        }
+        
         stopMonitoring()
         serviceScope.cancel()
         isRunning = false
+    }
+    
+    override fun onTaskRemoved(rootIntent: Intent?) {
+        super.onTaskRemoved(rootIntent)
+        Log.d(TAG, "Task removed")
+        
+        // 任务被移除时，如果启用自动启动则重启服务
+        if (prefs.autoStartEnabled) {
+            Log.d(TAG, "任务被移除，重启服务")
+            val restartIntent = Intent(applicationContext, ManicTimeService::class.java).apply {
+                action = ACTION_START
+            }
+            
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                startForegroundService(restartIntent)
+            } else {
+                startService(restartIntent)
+            }
+        }
     }
     
     private fun createNotificationChannel() {
@@ -194,129 +214,77 @@ class ManicTimeService : Service() {
                 }
             }
         }
-    }
-    
-    private fun startScreenshotCapture() {
-        if (screenshotResultCode == -1 || screenshotResultData == null) {
-            Log.e(TAG, "截图权限数据无效")
-            return
-        }
         
-        Log.d(TAG, "开始截图服务")
-        
-        val mediaProjectionManager = getSystemService(Context.MEDIA_PROJECTION_SERVICE) 
-            as MediaProjectionManager
-        mediaProjection = mediaProjectionManager.getMediaProjection(
-            screenshotResultCode,
-            screenshotResultData!!
-        )
-        
-        setupImageReader()
-        
+        // 启动截图文件扫描
         screenshotJob = serviceScope.launch {
-            delay(5000) // 等待5秒后开始第一次截图
             while (isActive) {
+                delay(10_000L) // 每10秒扫描一次截图目录
                 try {
-                    captureScreenshot()
+                    scanScreenshotFiles()
                 } catch (e: Exception) {
-                    Log.e(TAG, "截图失败", e)
+                    Log.e(TAG, "扫描截图文件失败", e)
                 }
-                delay(SCREENSHOT_INTERVAL)
             }
         }
     }
     
-    private fun setupImageReader() {
-        val windowManager = getSystemService(Context.WINDOW_SERVICE) as WindowManager
-        val metrics = DisplayMetrics()
-        windowManager.defaultDisplay.getMetrics(metrics)
-        
-        val width = metrics.widthPixels
-        val height = metrics.heightPixels
-        val density = metrics.densityDpi
-        
-        // 缩小分辨率以减少文件大小
-        val scaledWidth = width / 2
-        val scaledHeight = height / 2
-        
-        imageReader = ImageReader.newInstance(
-            scaledWidth,
-            scaledHeight,
-            PixelFormat.RGBA_8888,
-            2
-        )
-        
-        virtualDisplay = mediaProjection?.createVirtualDisplay(
-            "ManicTimeCapture",
-            scaledWidth,
-            scaledHeight,
-            density / 2,
-            DisplayManager.VIRTUAL_DISPLAY_FLAG_AUTO_MIRROR,
-            imageReader?.surface,
-            null,
-            null
-        )
-    }
-    
-    private suspend fun captureScreenshot() = withContext(Dispatchers.IO) {
+    /**
+     * 扫描辅助功能服务生成的截图文件
+     */
+    private suspend fun scanScreenshotFiles() = withContext(Dispatchers.IO) {
         try {
-            val image = imageReader?.acquireLatestImage() ?: return@withContext
+            val screenshotsDir = File(externalCacheDir ?: cacheDir, "screenshots")
+            if (!screenshotsDir.exists()) {
+                return@withContext
+            }
             
-            val planes = image.planes
-            val buffer = planes[0].buffer
-            val pixelStride = planes[0].pixelStride
-            val rowStride = planes[0].rowStride
-            val rowPadding = rowStride - pixelStride * image.width
+            val files = screenshotsDir.listFiles { file ->
+                file.name.startsWith("screenshot_") && file.name.endsWith(".jpg")
+            } ?: return@withContext
             
-            val bitmap = Bitmap.createBitmap(
-                image.width + rowPadding / pixelStride,
-                image.height,
-                Bitmap.Config.ARGB_8888
-            )
-            bitmap.copyPixelsFromBuffer(buffer)
-            image.close()
+            for (file in files) {
+                try {
+                    // 读取截图文件
+                    val bytes = file.readBytes()
+                    val timestamp = file.name
+                        .removePrefix("screenshot_")
+                        .removeSuffix(".jpg")
+                        .toLongOrNull() ?: System.currentTimeMillis()
+                    
+                    // 添加到上传队列
+                    val screenshot = ScreenshotData(
+                        timestamp = timestamp,
+                        imageData = bytes
+                    )
+                    screenshotQueue.add(screenshot)
+                    
+                    // 删除已处理的文件
+                    file.delete()
+                    
+                    Log.d(TAG, "扫描到截图: ${file.name}, 大小: ${bytes.size / 1024}KB")
+                } catch (e: Exception) {
+                    Log.e(TAG, "处理截图文件失败: ${file.name}", e)
+                }
+            }
             
-            // 裁剪多余部分
-            val croppedBitmap = Bitmap.createBitmap(
-                bitmap,
-                0, 0,
-                image.width,
-                image.height
-            )
-            
-            // 压缩为JPEG
-            val stream = ByteArrayOutputStream()
-            croppedBitmap.compress(Bitmap.CompressFormat.JPEG, 70, stream)
-            val bytes = stream.toByteArray()
-            
-            bitmap.recycle()
-            croppedBitmap.recycle()
-            
-            // 添加到队列
-            val screenshot = ScreenshotData(
-                timestamp = System.currentTimeMillis(),
-                imageData = bytes
-            )
-            screenshotQueue.add(screenshot)
-            
-            Log.d(TAG, "截图成功: ${bytes.size / 1024}KB, 队列大小: ${screenshotQueue.size}")
-            updateNotification("已截图 ${screenshotQueue.size} 张")
-            
+            if (files.isNotEmpty()) {
+                updateNotification("待上传 ${screenshotQueue.size} 张截图")
+            }
         } catch (e: Exception) {
-            Log.e(TAG, "截图处理失败", e)
+            Log.e(TAG, "扫描截图目录失败", e)
         }
     }
     
     private suspend fun checkCurrentActivity() = withContext(Dispatchers.IO) {
         try {
             val usageStatsManager = getSystemService(Context.USAGE_STATS_SERVICE) 
-                as UsageStatsManager
+                as android.app.usage.UsageStatsManager
             
             val endTime = System.currentTimeMillis()
             val startTime = endTime - 60_000 // 最近1分钟
             
             val stats = usageStatsManager.queryUsageStats(
-                UsageStatsManager.INTERVAL_BEST,
+                android.app.usage.UsageStatsManager.INTERVAL_BEST,
                 startTime,
                 endTime
             )
@@ -415,16 +383,9 @@ class ManicTimeService : Service() {
         screenshotJob?.cancel()
         uploadJob?.cancel()
         
-        virtualDisplay?.release()
-        imageReader?.close()
-        mediaProjection?.stop()
-        
         activityMonitorJob = null
         screenshotJob = null
         uploadJob = null
-        virtualDisplay = null
-        imageReader = null
-        mediaProjection = null
     }
 }
 
