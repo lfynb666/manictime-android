@@ -4,6 +4,7 @@ import android.app.Activity
 import android.app.AppOpsManager
 import android.content.Context
 import android.content.Intent
+import android.media.projection.MediaProjectionManager
 import android.net.Uri
 import android.os.Build
 import android.os.Bundle
@@ -12,6 +13,7 @@ import android.provider.Settings
 import android.widget.Toast
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
@@ -37,6 +39,25 @@ class MainActivity : ComponentActivity() {
     
     private lateinit var prefs: ManicTimePreferences
     private lateinit var apiClient: ManicTimeApiClient
+    
+    private val screenshotPermissionLauncher = registerForActivityResult(
+        ActivityResultContracts.StartActivityForResult()
+    ) { result ->
+        if (result.resultCode == Activity.RESULT_OK) {
+            val data = result.data
+            if (data != null) {
+                val intent = Intent(this, ManicTimeService::class.java).apply {
+                    action = ManicTimeService.ACTION_START_SCREENSHOT
+                    putExtra(ManicTimeService.EXTRA_RESULT_CODE, result.resultCode)
+                    putExtra(ManicTimeService.EXTRA_RESULT_DATA, data)
+                }
+                startService(intent)
+                Toast.makeText(this, "截图功能已启用", Toast.LENGTH_SHORT).show()
+            }
+        } else {
+            Toast.makeText(this, "需要截图权限才能启用截图功能", Toast.LENGTH_SHORT).show()
+        }
+    }
     
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -124,7 +145,11 @@ class MainActivity : ComponentActivity() {
                 )
                 
                 // 权限卡片
-                PermissionsCard()
+                PermissionsCard(
+                    onRequestScreenshot = {
+                        requestScreenshotPermission()
+                    }
+                )
                 
                 // 服务控制卡片
                 ServiceControlCard(
@@ -333,10 +358,9 @@ class MainActivity : ComponentActivity() {
     }
     
     @Composable
-    fun PermissionsCard() {
+    fun PermissionsCard(onRequestScreenshot: () -> Unit) {
         val context = LocalContext.current
         val hasUsageStats = hasUsageStatsPermission()
-        val hasAccessibility = isAccessibilityServiceEnabled()
         
         Card(modifier = Modifier.fillMaxWidth()) {
             Column(
@@ -351,7 +375,7 @@ class MainActivity : ComponentActivity() {
                 // 应用使用统计权限
                 PermissionItem(
                     title = "应用使用统计",
-                    description = "监控应用使用时间",
+                    description = "监控应用使用情况",
                     isGranted = hasUsageStats,
                     onRequest = {
                         val intent = Intent(Settings.ACTION_USAGE_ACCESS_SETTINGS)
@@ -359,16 +383,12 @@ class MainActivity : ComponentActivity() {
                     }
                 )
                 
-                // 辅助功能权限（用于自动截图）
+                // 截图权限
                 PermissionItem(
-                    title = "辅助功能（自动截图）",
-                    description = "一次授权永久有效，开机自动截图",
-                    isGranted = hasAccessibility,
-                    onRequest = {
-                        val intent = Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS)
-                        startActivity(intent)
-                        Toast.makeText(context, "请找到ManicTime并启用", Toast.LENGTH_LONG).show()
-                    }
+                    title = "截图权限",
+                    description = "每次启动需要授权",
+                    isGranted = false,
+                    onRequest = onRequestScreenshot
                 )
                 
                 // 电池优化
@@ -575,15 +595,10 @@ class MainActivity : ComponentActivity() {
         return mode == AppOpsManager.MODE_ALLOWED
     }
     
-    private fun isAccessibilityServiceEnabled(): Boolean {
-        val service = "${packageName}/${ScreenCaptureAccessibilityService::class.java.name}"
-        val enabledServices = Settings.Secure.getString(
-            contentResolver,
-            Settings.Secure.ENABLED_ACCESSIBILITY_SERVICES
-        )
-        return enabledServices?.contains(service) == true
+    private fun requestScreenshotPermission() {
+        val mediaProjectionManager = getSystemService(MEDIA_PROJECTION_SERVICE) as MediaProjectionManager
+        screenshotPermissionLauncher.launch(mediaProjectionManager.createScreenCaptureIntent())
     }
-    
     
     @Composable
     fun TestCard(
@@ -640,7 +655,71 @@ class MainActivity : ComponentActivity() {
     
     private suspend fun testScreenshotCapture(): String = withContext(kotlinx.coroutines.Dispatchers.IO) {
         val result = StringBuilder()
-        result.append("🔍 穷尽所有截图方法测试\n")
+        result.append("📸 测试MediaProjection截图\n")
+        result.append("=" .repeat(40) + "\n\n")
+        
+        // 检查服务是否有MediaProjection
+        if (!ManicTimeService.isRunning) {
+            result.append("❌ 服务未运行\n")
+            result.append("请先点击\"授权\"按钮获取截图权限\n")
+            return@withContext result.toString()
+        }
+        
+        result.append("✅ 服务运行中\n")
+        result.append("正在尝试截图...\n\n")
+        
+        try {
+            // 触发服务立即截图
+            val intent = Intent(this@MainActivity, ManicTimeService::class.java).apply {
+                action = "TEST_SCREENSHOT"
+            }
+            startService(intent)
+            
+            // 等待截图完成
+            delay(3000)
+            
+            // 检查截图目录
+            val screenshotManager = ScreenshotManager(this@MainActivity)
+            val screenshotsDir = screenshotManager.getScreenshotsDir()
+            
+            result.append("📂 截图目录: ${screenshotsDir.absolutePath}\n\n")
+            
+            if (!screenshotsDir.exists()) {
+                result.append("❌ 截图目录不存在\n")
+                return@withContext result.toString()
+            }
+            
+            val files = screenshotsDir.listFiles()?.sortedByDescending { it.lastModified() }
+            
+            if (files.isNullOrEmpty()) {
+                result.append("❌ 没有找到截图文件\n")
+                result.append("\n可能原因:\n")
+                result.append("1. 未授予截图权限\n")
+                result.append("2. MediaProjection未初始化\n")
+                result.append("3. 截图保存失败\n")
+            } else {
+                result.append("✅ 找到 ${files.size} 个文件\n\n")
+                
+                // 显示最新的3个文件
+                files.take(3).forEach { file ->
+                    result.append("📄 ${file.name}\n")
+                    result.append("   大小: ${file.length() / 1024}KB\n")
+                    result.append("   时间: ${java.text.SimpleDateFormat("HH:mm:ss", java.util.Locale.getDefault()).format(file.lastModified())}\n\n")
+                }
+                
+                result.append("🎉 截图功能正常！\n")
+            }
+            
+        } catch (e: Exception) {
+            result.append("❌ 测试失败: ${e.message}\n")
+        }
+        
+        return@withContext result.toString()
+    }
+    
+    private suspend fun testScreenshotCaptureOld(): String = withContext(kotlinx.coroutines.Dispatchers.IO) {
+        val result = StringBuilder()
+        result.append("📸 测试screencap命令\n")
         result.append("=" .repeat(40) + "\n\n")
         
         val timestamp = System.currentTimeMillis()

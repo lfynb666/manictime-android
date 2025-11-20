@@ -4,11 +4,24 @@ import android.app.*
 import android.app.usage.UsageStatsManager
 import android.content.Context
 import android.content.Intent
+import android.graphics.Bitmap
+import android.graphics.PixelFormat
+import android.hardware.display.DisplayManager
+import android.hardware.display.VirtualDisplay
+import android.media.Image
+import android.media.ImageReader
+import android.media.projection.MediaProjection
+import android.media.projection.MediaProjectionManager
 import android.os.Build
+import android.os.Handler
 import android.os.IBinder
+import android.os.Looper
+import android.util.DisplayMetrics
 import android.util.Log
+import android.view.WindowManager
 import androidx.core.app.NotificationCompat
 import kotlinx.coroutines.*
+import java.io.ByteArrayOutputStream
 import java.io.File
 
 /**
@@ -49,6 +62,9 @@ class ManicTimeService : Service() {
     private var lastActivityTime = 0L
     
     // 截图相关
+    private var mediaProjection: MediaProjection? = null
+    private var virtualDisplay: VirtualDisplay? = null
+    private var imageReader: ImageReader? = null
     private var screenshotJob: Job? = null
     
     // 数据缓存
@@ -82,6 +98,24 @@ class ManicTimeService : Service() {
                 stopMonitoring()
                 stopSelf()
             }
+            ACTION_START_SCREENSHOT -> {
+                val resultCode = intent.getIntExtra(EXTRA_RESULT_CODE, 0)
+                val data = intent.getParcelableExtra<Intent>(EXTRA_RESULT_DATA)
+                if (data != null) {
+                    startScreenshot(resultCode, data)
+                }
+            }
+            "TEST_SCREENSHOT" -> {
+                // 立即执行一次截图测试
+                serviceScope.launch {
+                    try {
+                        takeScreenshot()
+                        Log.d(TAG, "测试截图完成")
+                    } catch (e: Exception) {
+                        Log.e(TAG, "测试截图失败", e)
+                    }
+                }
+            }
         }
         
         return START_STICKY
@@ -93,6 +127,9 @@ class ManicTimeService : Service() {
         super.onDestroy()
         Log.d(TAG, "Service onDestroy")
         
+        // 清理截图资源
+        cleanupScreenshot()
+        
         // 如果启用了自动启动，则重启服务
         if (prefs.autoStartEnabled) {
             Log.d(TAG, "服务被销毁，准备重启")
@@ -100,7 +137,6 @@ class ManicTimeService : Service() {
                 action = ACTION_START
             }
             
-            // 使用PendingIntent延迟重启
             val pendingIntent = PendingIntent.getService(
                 applicationContext,
                 0,
@@ -111,7 +147,7 @@ class ManicTimeService : Service() {
             val alarmManager = getSystemService(Context.ALARM_SERVICE) as AlarmManager
             alarmManager.set(
                 AlarmManager.RTC_WAKEUP,
-                System.currentTimeMillis() + 1000, // 1秒后重启
+                System.currentTimeMillis() + 1000,
                 pendingIntent
             )
         }
@@ -387,7 +423,79 @@ class ManicTimeService : Service() {
         screenshotJob = null
         uploadJob = null
     }
-}
+    
+    private fun startScreenshot(resultCode: Int, data: Intent) {
+        Log.d(TAG, "启动截图功能")
+        
+        val mediaProjectionManager = getSystemService(MEDIA_PROJECTION_SERVICE) as MediaProjectionManager
+        mediaProjection = mediaProjectionManager.getMediaProjection(resultCode, data)
+        
+        if (mediaProjection == null) {
+            Log.e(TAG, "获取MediaProjection失败")
+            return
+        }
+        
+        screenshotJob = serviceScope.launch {
+            delay(5000)
+            
+            while (isActive && prefs.screenshotEnabled) {
+                try {
+                    takeScreenshot()
+                } catch (e: Exception) {
+                    Log.e(TAG, "截图失败", e)
+                }
+                delay(prefs.screenshotInterval)
+            }
+        }
+        
+        updateNotification("截图功能已启用")
+    }
+    
+    private suspend fun takeScreenshot() {
+        if (mediaProjection == null) {
+            Log.w(TAG, "MediaProjection未初始化")
+            return
+        }
+        
+        try {
+            val screenshotHelper = MediaProjectionScreenshot(this, mediaProjection!!)
+            val file = screenshotHelper.captureScreen()
+            
+            if (file != null && file.exists()) {
+                Log.d(TAG, "截图成功: ${file.name}, 大小: ${file.length() / 1024}KB")
+                
+                val screenshotManager = ScreenshotManager(this)
+                val result = screenshotManager.saveScreenshot(file)
+                
+                if (result != null) {
+                    val (originalFile, thumbnailFile) = result
+                    screenshotManager.markForUpload(originalFile, thumbnailFile)
+                    Log.d(TAG, "截图已保存: ${originalFile.name}")
+                }
+                
+                file.delete()
+            }
+        } catch (e: Exception) {
+            Log.e(TAG, "截图过程出错", e)
+        }
+    }
+    
+    private fun cleanupScreenshot() {
+        try {
+            screenshotJob?.cancel()
+            mediaProjection?.stop()
+            virtualDisplay?.release()
+            imageReader?.close()
+            
+            mediaProjection = null
+            virtualDisplay = null
+            imageReader = null
+            
+            Log.d(TAG, "截图资源已清理")
+        } catch (e: Exception) {
+            Log.e(TAG, "清理截图资源失败", e)
+        }
+    }
 
 // 数据类
 data class ActivityRecord(

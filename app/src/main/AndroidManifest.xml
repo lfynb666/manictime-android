@@ -48,29 +48,13 @@
             </intent-filter>
         </activity>
 
-        <!-- 前台服务 -->
+        <!-- 前台服务 - 包含截图功能 -->
         <service
             android:name=".ManicTimeService"
             android:enabled="true"
             android:exported="false"
             android:stopWithTask="false"
-            android:foregroundServiceType="specialUse">
-            <property
-                android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
-                android:value="时间追踪和活动监控" />
-        </service>
-        
-        <!-- 辅助功能服务（用于自动截图） -->
-        <service
-            android:name=".ScreenCaptureAccessibilityService"
-            android:permission="android.permission.BIND_ACCESSIBILITY_SERVICE"
-            android:exported="true">
-            <intent-filter>
-                <action android:name="android.accessibilityservice.AccessibilityService" />
-            </intent-filter>
-            <meta-data
-                android:name="android.accessibilityservice"
-                android:resource="@xml/accessibility_service_config" />
+            android:foregroundServiceType="mediaProjection">
         </service>
         
         <!-- 开机自启动广播接收器 -->
