@@ -19,6 +19,7 @@ class ManicTimePreferences(private val context: Context) {
         private const val KEY_PASSWORD = "password"
         private const val KEY_ACCESS_TOKEN = "access_token"
         private const val KEY_DEVICE_ID = "device_id"
+        private const val KEY_DEVICE_UUID = "device_uuid"
         private const val KEY_SCREENSHOT_ENABLED = "screenshot_enabled"
         private const val KEY_SCREENSHOT_INTERVAL = "screenshot_interval"
         private const val KEY_ACTIVITY_INTERVAL = "activity_interval"
@@ -60,6 +61,20 @@ class ManicTimePreferences(private val context: Context) {
             return id
         }
         set(value) = prefs.edit().putString(KEY_DEVICE_ID, value).apply()
+    
+    /**
+     * 设备UUID - 用于截图目录结构，格式与Windows客户端一致
+     * 一旦生成就固定不变
+     */
+    val deviceUUID: String
+        get() {
+            var uuid = prefs.getString(KEY_DEVICE_UUID, null)
+            if (uuid == null) {
+                uuid = java.util.UUID.randomUUID().toString()
+                prefs.edit().putString(KEY_DEVICE_UUID, uuid).apply()
+            }
+            return uuid
+        }
     
     var screenshotEnabled: Boolean
         get() = prefs.getBoolean(KEY_SCREENSHOT_ENABLED, true)

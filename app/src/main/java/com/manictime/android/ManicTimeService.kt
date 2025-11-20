@@ -58,6 +58,7 @@ class ManicTimeService : Service() {
     
     private lateinit var prefs: ManicTimePreferences
     private lateinit var apiClient: ManicTimeApiClient
+    private lateinit var screenshotUploader: ScreenshotUploader
     private val serviceScope = CoroutineScope(Dispatchers.Default + SupervisorJob())
     
     // 应用监控
@@ -95,6 +96,7 @@ class ManicTimeService : Service() {
         
         prefs = ManicTimePreferences(this)
         apiClient = ManicTimeApiClient(prefs)
+        screenshotUploader = ScreenshotUploader(prefs)
         
         createNotificationChannel()
         isRunning = true
@@ -413,8 +415,8 @@ class ManicTimeService : Service() {
         
         // 上传活动记录
         if (activityQueue.isNotEmpty()) {
+            val activities = activityQueue.toList()
             try {
-                val activities = activityQueue.toList()
                 Log.d(TAG, "准备上传 ${activities.size} 条活动记录")
                 activityQueue.clear()
                 
@@ -436,24 +438,45 @@ class ManicTimeService : Service() {
             Log.d(TAG, "活动队列为空，跳过")
         }
         
-        // 上传截图
+        // 上传截图（通过SFTP）
         if (screenshotQueue.isNotEmpty()) {
             try {
                 val screenshots = screenshotQueue.take(3).toList() // 一次最多上传3张
                 Log.d(TAG, "准备上传 ${screenshots.size} 张截图")
                 
+                var successCount = 0
                 for (screenshot in screenshots) {
                     Log.d(TAG, "上传截图: timestamp=${screenshot.timestamp}")
-                    apiClient.uploadScreenshot(screenshot)
-                    screenshotQueue.remove(screenshot)
+                    
+                    // 从文件路径读取并上传
+                    val file = if (screenshot.originalPath != null) {
+                        File(screenshot.originalPath)
+                    } else {
+                        null
+                    }
+                    
+                    if (file != null && file.exists()) {
+                        val success = screenshotUploader.uploadScreenshot(file, screenshot.timestamp)
+                        if (success) {
+                            successCount++
+                            screenshotQueue.remove(screenshot)
+                            // 删除本地文件
+                            file.delete()
+                        }
+                    } else {
+                        Log.w(TAG, "截图文件不存在，从队列移除")
+                        screenshotQueue.remove(screenshot)
+                    }
                 }
                 
-                Log.d(TAG, "✅ 成功上传了 ${screenshots.size} 张截图")
-                updateNotification("已上传 ${screenshots.size} 张截图")
-                
-                // 记录上报时间
-                prefs.setLastReportTime("screenshots", System.currentTimeMillis())
-                Log.d(TAG, "已记录screenshots上报时间")
+                if (successCount > 0) {
+                    Log.d(TAG, "✅ 成功上传了 $successCount 张截图")
+                    updateNotification("已上传 $successCount 张截图")
+                    
+                    // 记录上报时间
+                    prefs.setLastReportTime("screenshots", System.currentTimeMillis())
+                    Log.d(TAG, "已记录screenshots上报时间")
+                }
             } catch (e: Exception) {
                 Log.e(TAG, "❌ 上传截图失败: ${e.message}", e)
             }

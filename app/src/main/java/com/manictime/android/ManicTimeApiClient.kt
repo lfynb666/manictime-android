@@ -216,41 +216,7 @@ class ManicTimeApiClient(private val prefs: ManicTimePreferences) {
         return String.format("%02X%02X%02X", r, g, b)
     }
     
-    /**
-     * 上传截图
-     */
-    suspend fun uploadScreenshot(screenshot: ScreenshotData) = withContext(Dispatchers.IO) {
-        val url = "${prefs.serverUrl}/api/screenshots"
-        
-        // 从文件路径或字节数组获取图片数据
-        val imageData = when {
-            screenshot.imageData != null -> screenshot.imageData
-            screenshot.originalPath != null -> {
-                val file = java.io.File(screenshot.originalPath)
-                if (file.exists()) file.readBytes() else {
-                    Log.e(TAG, "截图文件不存在: ${screenshot.originalPath}")
-                    return@withContext
-                }
-            }
-            else -> {
-                Log.e(TAG, "截图数据为空")
-                return@withContext
-            }
-        }
-        
-        val base64Image = Base64.encodeToString(imageData, Base64.NO_WRAP)
-        val timestamp = dateFormat.format(Date(screenshot.timestamp))
-        
-        val json = JSONObject().apply {
-            put("capturedTime", timestamp)
-            put("imageData", base64Image)
-            put("imageFormat", "jpeg")
-            put("deviceName", "Android-${android.os.Build.MODEL}")
-        }
-        
-        Log.d(TAG, "上传截图: ${imageData.size / 1024}KB at $timestamp")
-        post(url, json.toString(), CONTENT_TYPE_JSON)
-    }
+    // 截图上传已移至 ScreenshotUploader.kt，通过SFTP直接上传到服务器文件系统
     
     /**
      * 创建标签活动
