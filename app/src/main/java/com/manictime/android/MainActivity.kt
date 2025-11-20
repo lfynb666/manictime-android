@@ -641,49 +641,76 @@ class MainActivity : ComponentActivity() {
     private suspend fun testScreenshotCapture(): String = withContext(kotlinx.coroutines.Dispatchers.IO) {
         try {
             val result = StringBuilder()
+            result.append("🔍 正在执行截图测试...\n\n")
             
             // 1. 检查辅助功能
             val isAccessibilityEnabled = isAccessibilityServiceEnabled()
             result.append("📱 辅助功能: ${if (isAccessibilityEnabled) "✅ 已启用" else "❌ 未启用"}\n")
             
-            // 2. 检查辅助功能服务是否运行
-            val serviceRunning = ScreenCaptureAccessibilityService.isRunning()
-            result.append("🔧 服务状态: ${if (serviceRunning) "✅ 运行中" else "❌ 未运行"}\n")
-            
-            // 3. 检查截图开关
-            val screenshotEnabled = prefs.screenshotEnabled
-            result.append("📸 截图开关: ${if (screenshotEnabled) "✅ 已启用" else "❌ 已关闭"}\n")
-            
-            // 4. 检查存储路径
-            val screenshotManager = ScreenshotManager(this@MainActivity)
-            val screenshotsDir = screenshotManager.getScreenshotsDir()
-            result.append("💾 保存路径: ${screenshotsDir.absolutePath}\n")
-            
-            // 5. 检查路径是否可写
-            val testFile = java.io.File(screenshotsDir, "test_${System.currentTimeMillis()}.jpg")
-            val canWrite = testFile.createNewFile()
-            if (canWrite) {
-                testFile.delete()
-                result.append("✍️ 路径可写: ✅ 是\n")
-            } else {
-                result.append("✍️ 路径可写: ❌ 否\n")
+            if (!isAccessibilityEnabled) {
+                result.append("\n❌ 请先在系统设置中启用ManicTime辅助功能")
+                return@withContext result.toString()
             }
             
-            // 6. 检查现有截图
-            val existingFiles = screenshotsDir.listFiles()?.size ?: 0
-            result.append("📂 现有截图: $existingFiles 张\n")
+            // 2. 检查辅助功能服务是否运行
+            val service = ScreenCaptureAccessibilityService.getInstance()
+            val serviceRunning = service != null
+            result.append("🔧 服务状态: ${if (serviceRunning) "✅ 运行中" else "❌ 未运行"}\n")
             
-            // 7. 截图间隔
-            result.append("⏱️ 截图间隔: ${prefs.screenshotInterval / 1000} 秒\n\n")
+            if (!serviceRunning) {
+                result.append("\n❌ 辅助功能服务未运行，请重启应用")
+                return@withContext result.toString()
+            }
             
-            // 诊断建议
-            result.append("🔍 诊断结果:\n")
-            when {
-                !isAccessibilityEnabled -> result.append("❌ 请在系统设置中启用ManicTime辅助功能\n")
-                !serviceRunning -> result.append("❌ 辅助功能服务未运行，请重启应用\n")
-                !screenshotEnabled -> result.append("❌ 请在下方设置中启用截图功能\n")
-                !canWrite -> result.append("❌ 存储路径不可写，请检查权限\n")
-                else -> result.append("✅ 一切正常！截图将在 ${prefs.screenshotInterval / 1000} 秒后开始\n")
+            // 3. 检查存储路径
+            val screenshotManager = ScreenshotManager(this@MainActivity)
+            val screenshotsDir = screenshotManager.getScreenshotsDir()
+            result.append("💾 保存路径: ${screenshotsDir.absolutePath}\n\n")
+            
+            // 4. 立即执行截图测试
+            result.append("📸 正在执行截图...\n")
+            
+            try {
+                // 使用screencap命令截图
+                val timestamp = System.currentTimeMillis()
+                val cacheDir = externalCacheDir ?: cacheDir
+                val tempFile = java.io.File(cacheDir, "test_screenshot_$timestamp.png")
+                
+                val process = Runtime.getRuntime().exec(
+                    arrayOf("screencap", "-p", tempFile.absolutePath)
+                )
+                process.waitFor()
+                
+                if (tempFile.exists() && tempFile.length() > 0) {
+                    result.append("✅ 截图命令执行成功！\n")
+                    result.append("📏 临时文件大小: ${tempFile.length() / 1024}KB\n\n")
+                    
+                    // 使用ScreenshotManager保存
+                    result.append("💾 正在保存截图...\n")
+                    val savedResult = screenshotManager.saveScreenshot(tempFile)
+                    
+                    if (savedResult != null) {
+                        val (originalFile, thumbnailFile) = savedResult
+                        result.append("✅ 截图保存成功！\n\n")
+                        result.append("📄 原图: ${originalFile.name}\n")
+                        result.append("   大小: ${originalFile.length() / 1024}KB\n")
+                        result.append("📄 缩略图: ${thumbnailFile.name}\n")
+                        result.append("   大小: ${thumbnailFile.length() / 1024}KB\n\n")
+                        result.append("🎉 测试成功！请到以下路径查看:\n${screenshotsDir.absolutePath}")
+                    } else {
+                        result.append("❌ 保存失败")
+                    }
+                    
+                    // 清理临时文件
+                    tempFile.delete()
+                } else {
+                    result.append("❌ 截图命令执行失败\n")
+                    result.append("可能原因: 系统不允许使用screencap命令\n")
+                    result.append("建议: 尝试授予应用更多权限或使用root权限")
+                }
+            } catch (e: Exception) {
+                result.append("❌ 截图失败: ${e.message}\n")
+                result.append("详细错误: ${e.stackTraceToString()}")
             }
             
             return@withContext result.toString()
