@@ -640,31 +640,55 @@ class MainActivity : ComponentActivity() {
     
     private suspend fun testScreenshotCapture(): String = withContext(kotlinx.coroutines.Dispatchers.IO) {
         try {
-            // 检查辅助功能是否启用
-            val isAccessibilityEnabled = isAccessibilityServiceEnabled()
+            val result = StringBuilder()
             
-            // 检查存储权限
+            // 1. 检查辅助功能
+            val isAccessibilityEnabled = isAccessibilityServiceEnabled()
+            result.append("📱 辅助功能: ${if (isAccessibilityEnabled) "✅ 已启用" else "❌ 未启用"}\n")
+            
+            // 2. 检查辅助功能服务是否运行
+            val serviceRunning = ScreenCaptureAccessibilityService.isRunning()
+            result.append("🔧 服务状态: ${if (serviceRunning) "✅ 运行中" else "❌ 未运行"}\n")
+            
+            // 3. 检查截图开关
+            val screenshotEnabled = prefs.screenshotEnabled
+            result.append("📸 截图开关: ${if (screenshotEnabled) "✅ 已启用" else "❌ 已关闭"}\n")
+            
+            // 4. 检查存储路径
             val screenshotManager = ScreenshotManager(this@MainActivity)
             val screenshotsDir = screenshotManager.getScreenshotsDir()
-            val testFile = java.io.File(screenshotsDir, "test_${System.currentTimeMillis()}.jpg")
+            result.append("💾 保存路径: ${screenshotsDir.absolutePath}\n")
             
-            // 尝试创建测试文件
-            if (testFile.createNewFile()) {
+            // 5. 检查路径是否可写
+            val testFile = java.io.File(screenshotsDir, "test_${System.currentTimeMillis()}.jpg")
+            val canWrite = testFile.createNewFile()
+            if (canWrite) {
                 testFile.delete()
-                return@withContext "✅ 截图功能准备就绪\n\n" +
-                    "辅助功能: ${if (isAccessibilityEnabled) "已启用 ✓" else "未启用 ✗"}\n" +
-                    "保存路径: ${screenshotsDir.absolutePath}\n" +
-                    "文件名格式: Screenshot_YYYY-MM-DD_HH-MM-SS.jpg\n\n" +
-                    "⚠️ 注意: ${if (!isAccessibilityEnabled) "请先启用辅助功能" else "截图将自动保存"}"
+                result.append("✍️ 路径可写: ✅ 是\n")
             } else {
-                return@withContext "❌ 无法创建文件，请检查存储权限"
+                result.append("✍️ 路径可写: ❌ 否\n")
             }
+            
+            // 6. 检查现有截图
+            val existingFiles = screenshotsDir.listFiles()?.size ?: 0
+            result.append("📂 现有截图: $existingFiles 张\n")
+            
+            // 7. 截图间隔
+            result.append("⏱️ 截图间隔: ${prefs.screenshotInterval / 1000} 秒\n\n")
+            
+            // 诊断建议
+            result.append("🔍 诊断结果:\n")
+            when {
+                !isAccessibilityEnabled -> result.append("❌ 请在系统设置中启用ManicTime辅助功能\n")
+                !serviceRunning -> result.append("❌ 辅助功能服务未运行，请重启应用\n")
+                !screenshotEnabled -> result.append("❌ 请在下方设置中启用截图功能\n")
+                !canWrite -> result.append("❌ 存储路径不可写，请检查权限\n")
+                else -> result.append("✅ 一切正常！截图将在 ${prefs.screenshotInterval / 1000} 秒后开始\n")
+            }
+            
+            return@withContext result.toString()
         } catch (e: Exception) {
-            return@withContext "❌ 测试失败: ${e.message}\n\n" +
-                "可能原因:\n" +
-                "1. 缺少存储权限\n" +
-                "2. 存储空间不足\n" +
-                "3. 系统限制"
+            return@withContext "❌ 测试失败: ${e.message}\n\n堆栈: ${e.stackTraceToString()}"
         }
     }
 }
