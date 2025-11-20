@@ -443,21 +443,29 @@ curl http://你的服务器:8080/api/timelines \
 
 ---
 
-## 📝 更新日志
+## 更新日志
+
+### v1.1.0 (2025-11-21)
+
+- 实现完整的Timeline数据收集
+- 添加AccessibilityService收集Documents数据
+- 添加DeviceStateReceiver监听设备状态
+- 支持Applications、Computer usage、Documents、Screenshots四个timeline
+- 优先使用Applications timeline而不是Tags
 
 ### v1.0.0 (2025-11-18)
 
-- ✅ 初始版本发布
-- ✅ 实现OAuth认证
-- ✅ 实现应用使用监控
-- ✅ 实现定时截图功能
-- ✅ 实现数据自动同步
-- ✅ 实现前台服务
-- ✅ Material Design 3 UI
+- 初始版本发布
+- 实现OAuth认证
+- 实现应用使用监控
+- 实现定时截图功能
+- 实现数据自动同步
+- 实现前台服务
+- Material Design 3 UI
 
 ---
 
-## 🤝 常见问题
+## 常见问题
 
 ### Q: 为什么需要这么多权限?
 
