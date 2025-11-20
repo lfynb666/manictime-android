@@ -50,6 +50,9 @@ class ManicTimeService : Service() {
         const val UPLOAD_INTERVAL = 60_000L // 1分钟上传一次
         
         var isRunning = false
+        private var instance: ManicTimeService? = null
+        
+        fun getInstance(): ManicTimeService? = instance
     }
     
     private lateinit var prefs: ManicTimePreferences
@@ -75,9 +78,19 @@ class ManicTimeService : Service() {
     // Timeline信息
     private var timelineKey: String? = null
     
+    // 设备状态监听
+    private var deviceStateReceiver: DeviceStateReceiver? = null
+    private var lastDeviceState: DeviceState? = null
+    private var deviceStateStartTime = 0L
+    
+    // Documents数据缓存
+    private val documentsQueue = mutableListOf<DocumentRecord>()
+    private var lastDocument: DocumentRecord? = null
+    
     override fun onCreate() {
         super.onCreate()
         Log.d(TAG, "Service onCreate")
+        instance = this
         
         prefs = ManicTimePreferences(this)
         apiClient = ManicTimeApiClient(prefs)
@@ -496,6 +509,46 @@ class ManicTimeService : Service() {
             Log.e(TAG, "清理截图资源失败", e)
         }
     }
+    
+    /**
+     * 设备状态变化回调（从DeviceStateReceiver调用）
+     */
+    fun onDeviceStateChanged(state: DeviceState) {
+        val currentTime = System.currentTimeMillis()
+        
+        // 记录上一个状态的持续时间
+        if (lastDeviceState != null && deviceStateStartTime > 0) {
+            val duration = (currentTime - deviceStateStartTime) / 1000
+            if (duration > 0) {
+                // TODO: 上传到Computer usage timeline
+                Log.d(TAG, "设备状态: $lastDeviceState, 持续: ${duration}秒")
+            }
+        }
+        
+        lastDeviceState = state
+        deviceStateStartTime = currentTime
+    }
+    
+    /**
+     * 文档变化回调（从AccessibilityService调用）
+     */
+    fun onDocumentChanged(packageName: String, title: String?, url: String?) {
+        val currentTime = System.currentTimeMillis()
+        
+        val document = DocumentRecord(
+            packageName = packageName,
+            title = title ?: "",
+            url = url,
+            timestamp = currentTime
+        )
+        
+        // 避免重复记录
+        if (document != lastDocument) {
+            lastDocument = document
+            documentsQueue.add(document)
+            Log.d(TAG, "文档变化: $packageName - $title - $url")
+        }
+    }
 }
 
 // 数据类
@@ -519,3 +572,10 @@ data class ScreenshotData(
     
     override fun hashCode(): Int = timestamp.hashCode()
 }
+
+data class DocumentRecord(
+    val packageName: String,
+    val title: String,
+    val url: String?,
+    val timestamp: Long
+)

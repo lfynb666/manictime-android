@@ -79,13 +79,49 @@ class ManicTimeApiClient(private val prefs: ManicTimePreferences) {
         val timelines = json.getJSONArray("timelines")
         val deviceName = "Android-${android.os.Build.MODEL}"
         
-        // 2. 查找标签timeline
+        // 2. 打印所有timeline类型
+        Log.d(TAG, "=== 可用的Timeline列表 ===")
+        for (i in 0 until timelines.length()) {
+            val timeline = timelines.getJSONObject(i)
+            val schema = timeline.getJSONObject("schema")
+            val schemaName = schema.getString("name")
+            val timelineKey = timeline.getString("timelineKey")
+            Log.d(TAG, "Timeline $i: $schemaName -> $timelineKey")
+        }
+        
+        // 3. 查找Applications timeline (用于应用使用记录)
         for (i in 0 until timelines.length()) {
             val timeline = timelines.getJSONObject(i)
             val schema = timeline.getJSONObject("schema")
             val schemaName = schema.getString("name")
             
-            // 寻找Tags类型的timeline
+            // 优先查找Applications类型的timeline
+            if (schemaName == "ManicTime/Applications") {
+                val timelineKey = timeline.getString("timelineKey")
+                Log.d(TAG, "✅ 使用Applications timeline: $timelineKey")
+                return@withContext timelineKey
+            }
+        }
+        
+        // 4. 如果没有Applications，查找Computer usage
+        for (i in 0 until timelines.length()) {
+            val timeline = timelines.getJSONObject(i)
+            val schema = timeline.getJSONObject("schema")
+            val schemaName = schema.getString("name")
+            
+            if (schemaName.contains("Computer usage", ignoreCase = true)) {
+                val timelineKey = timeline.getString("timelineKey")
+                Log.d(TAG, "✅ 使用Computer Usage timeline: $timelineKey")
+                return@withContext timelineKey
+            }
+        }
+        
+        // 如果没有找到Computer Usage，再找Tags
+        for (i in 0 until timelines.length()) {
+            val timeline = timelines.getJSONObject(i)
+            val schema = timeline.getJSONObject("schema")
+            val schemaName = schema.getString("name")
+            
             if (schemaName == "ManicTime/Tags") {
                 val timelineKey = timeline.getString("timelineKey")
                 Log.d(TAG, "找到Tags timeline: $timelineKey")
@@ -93,11 +129,13 @@ class ManicTimeApiClient(private val prefs: ManicTimePreferences) {
             }
         }
         
-        // 如果没有找到,使用第一个timeline
+        // 如果都没有找到,使用第一个timeline
         if (timelines.length() > 0) {
             val firstTimeline = timelines.getJSONObject(0)
             val timelineKey = firstTimeline.getString("timelineKey")
-            Log.d(TAG, "使用第一个timeline: $timelineKey")
+            val schema = firstTimeline.getJSONObject("schema")
+            val schemaName = schema.getString("name")
+            Log.d(TAG, "使用第一个timeline: $timelineKey (类型: $schemaName)")
             return@withContext timelineKey
         }
         
