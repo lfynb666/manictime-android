@@ -4,6 +4,8 @@
 
 这是一个功能完整的ManicTime Android客户端,可以像Windows版本一样实时监控应用使用、定时截图,并将所有数据同步到你的ManicTime Server。
 
+**最新版本**: v1.1.1 - 添加数据上报监控面板
+
 ### ✨ 核心功能
 
 1. ✅ **OAuth认证** - 安全连接到ManicTime Server
