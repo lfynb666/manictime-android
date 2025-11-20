@@ -42,10 +42,29 @@ class ManicTimeApiClient(private val prefs: ManicTimePreferences) {
                 "&username=${URLEncoder.encode(prefs.username, "UTF-8")}" +
                 "&password=${URLEncoder.encode(prefs.password, "UTF-8")}"
         
-        val response = post(url, params, CONTENT_TYPE_FORM, useAuth = false)
-        val json = JSONObject(response)
+        Log.d(TAG, "认证请求: $url")
         
-        json.getString("token")
+        try {
+            val response = post(url, params, CONTENT_TYPE_FORM, useAuth = false)
+            Log.d(TAG, "认证响应: $response")
+            
+            val json = JSONObject(response)
+            
+            // ManicTime Server返回的是access_token，不是token
+            val token = if (json.has("access_token")) {
+                json.getString("access_token")
+            } else if (json.has("token")) {
+                json.getString("token")
+            } else {
+                throw Exception("响应中没有找到token字段")
+            }
+            
+            Log.d(TAG, "认证成功，token长度: ${token.length}")
+            token
+        } catch (e: Exception) {
+            Log.e(TAG, "认证失败", e)
+            throw Exception("认证失败: ${e.message}")
+        }
     }
     
     /**
@@ -283,14 +302,22 @@ class ManicTimeApiClient(private val prefs: ManicTimePreferences) {
             }
             
             val responseCode = connection.responseCode
-            Log.d(TAG, "POST $urlString -> $responseCode")
+            val responseMessage = connection.responseMessage
+            Log.d(TAG, "POST $urlString -> $responseCode $responseMessage")
             
             if (responseCode == HttpURLConnection.HTTP_OK || 
                 responseCode == HttpURLConnection.HTTP_CREATED) {
                 return readResponse(connection)
             } else {
                 val error = readErrorResponse(connection)
-                throw Exception("HTTP $responseCode: $error")
+                Log.e(TAG, "POST失败 $responseCode: $error")
+                
+                // 特殊处理502错误
+                if (responseCode == HttpURLConnection.HTTP_BAD_GATEWAY) {
+                    throw Exception("服务器网关错误(502)，请检查ManicTime Server是否正常运行")
+                }
+                
+                throw Exception("HTTP $responseCode $responseMessage: $error")
             }
         } finally {
             connection.disconnect()
