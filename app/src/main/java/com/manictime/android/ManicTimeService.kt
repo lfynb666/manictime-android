@@ -40,6 +40,7 @@ class ManicTimeService : Service() {
         const val ACTION_START = "com.manictime.android.START"
         const val ACTION_STOP = "com.manictime.android.STOP"
         const val ACTION_START_SCREENSHOT = "com.manictime.android.START_SCREENSHOT"
+        const val ACTION_MANUAL_UPLOAD = "com.manictime.android.MANUAL_UPLOAD"
         
         const val EXTRA_RESULT_CODE = "resultCode"
         const val EXTRA_RESULT_DATA = "resultData"
@@ -126,6 +127,17 @@ class ManicTimeService : Service() {
                         Log.d(TAG, "测试截图完成")
                     } catch (e: Exception) {
                         Log.e(TAG, "测试截图失败", e)
+                    }
+                }
+            }
+            ACTION_MANUAL_UPLOAD -> {
+                // 手动触发上传
+                serviceScope.launch {
+                    try {
+                        Log.d(TAG, "手动触发上传")
+                        uploadPendingData()
+                    } catch (e: Exception) {
+                        Log.e(TAG, "手动上传失败", e)
                     }
                 }
             }
@@ -383,6 +395,8 @@ class ManicTimeService : Service() {
     }
     
     private suspend fun uploadPendingData() = withContext(Dispatchers.IO) {
+        Log.d(TAG, "uploadPendingData 开始 - timelineKey: $timelineKey, activityQueue: ${activityQueue.size}, screenshotQueue: ${screenshotQueue.size}")
+        
         if (timelineKey == null) {
             Log.w(TAG, "Timeline未初始化,跳过上传")
             return@withContext
@@ -392,43 +406,55 @@ class ManicTimeService : Service() {
         if (activityQueue.isNotEmpty()) {
             try {
                 val activities = activityQueue.toList()
+                Log.d(TAG, "准备上传 ${activities.size} 条活动记录")
                 activityQueue.clear()
                 
                 for (activity in activities) {
+                    Log.d(TAG, "上传活动: ${activity.appName}, 时长: ${activity.duration}秒")
                     apiClient.uploadActivity(timelineKey!!, activity)
                 }
                 
-                Log.d(TAG, "上传了 ${activities.size} 条活动记录")
+                Log.d(TAG, "✅ 成功上传了 ${activities.size} 条活动记录")
                 updateNotification("已同步 ${activities.size} 条活动")
                 
                 // 记录上报时间
                 prefs.setLastReportTime("applications", System.currentTimeMillis())
+                Log.d(TAG, "已记录applications上报时间")
             } catch (e: Exception) {
-                Log.e(TAG, "上传活动失败", e)
+                Log.e(TAG, "❌ 上传活动失败: ${e.message}", e)
                 // 失败则放回队列
                 activityQueue.addAll(0, activityQueue)
             }
+        } else {
+            Log.d(TAG, "活动队列为空，跳过")
         }
         
         // 上传截图
         if (screenshotQueue.isNotEmpty()) {
             try {
                 val screenshots = screenshotQueue.take(3).toList() // 一次最多上传3张
+                Log.d(TAG, "准备上传 ${screenshots.size} 张截图")
                 
                 for (screenshot in screenshots) {
+                    Log.d(TAG, "上传截图: timestamp=${screenshot.timestamp}")
                     apiClient.uploadScreenshot(screenshot)
                     screenshotQueue.remove(screenshot)
                 }
                 
-                Log.d(TAG, "上传了 ${screenshots.size} 张截图")
+                Log.d(TAG, "✅ 成功上传了 ${screenshots.size} 张截图")
                 updateNotification("已上传 ${screenshots.size} 张截图")
                 
                 // 记录上报时间
                 prefs.setLastReportTime("screenshots", System.currentTimeMillis())
+                Log.d(TAG, "已记录screenshots上报时间")
             } catch (e: Exception) {
-                Log.e(TAG, "上传截图失败", e)
+                Log.e(TAG, "❌ 上传截图失败: ${e.message}", e)
             }
+        } else {
+            Log.d(TAG, "截图队列为空，跳过")
         }
+        
+        Log.d(TAG, "uploadPendingData 完成")
     }
     
     private fun stopMonitoring() {

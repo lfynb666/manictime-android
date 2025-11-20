@@ -1025,10 +1025,14 @@ class MainActivity : ComponentActivity() {
                                 try {
                                     // 触发手动上传
                                     val intent = Intent(this@MainActivity, ManicTimeService::class.java).apply {
-                                        action = "MANUAL_UPLOAD_$key"
+                                        action = ManicTimeService.ACTION_MANUAL_UPLOAD
                                     }
                                     startService(intent)
-                                    Toast.makeText(this@MainActivity, "已触发${name}上传", Toast.LENGTH_SHORT).show()
+                                    Toast.makeText(this@MainActivity, "已触发上传", Toast.LENGTH_SHORT).show()
+                                    
+                                    // 延迟刷新显示
+                                    kotlinx.coroutines.delay(500)
+                                    lastReportTimes = prefs.getAllLastReportTimes()
                                 } finally {
                                     isRefreshing = false
                                 }
