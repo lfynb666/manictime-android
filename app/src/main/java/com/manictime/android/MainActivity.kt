@@ -43,19 +43,39 @@ class MainActivity : ComponentActivity() {
     private val screenshotPermissionLauncher = registerForActivityResult(
         ActivityResultContracts.StartActivityForResult()
     ) { result ->
-        if (result.resultCode == Activity.RESULT_OK) {
-            val data = result.data
-            if (data != null) {
-                val intent = Intent(this, ManicTimeService::class.java).apply {
-                    action = ManicTimeService.ACTION_START_SCREENSHOT
-                    putExtra(ManicTimeService.EXTRA_RESULT_CODE, result.resultCode)
-                    putExtra(ManicTimeService.EXTRA_RESULT_DATA, data)
+        try {
+            if (result.resultCode == Activity.RESULT_OK) {
+                val data = result.data
+                if (data != null) {
+                    // 先启动前台服务
+                    val startIntent = Intent(this, ManicTimeService::class.java).apply {
+                        action = ManicTimeService.ACTION_START
+                    }
+                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                        startForegroundService(startIntent)
+                    } else {
+                        startService(startIntent)
+                    }
+                    
+                    // 延迟发送截图权限
+                    android.os.Handler(android.os.Looper.getMainLooper()).postDelayed({
+                        val intent = Intent(this, ManicTimeService::class.java).apply {
+                            action = ManicTimeService.ACTION_START_SCREENSHOT
+                            putExtra(ManicTimeService.EXTRA_RESULT_CODE, result.resultCode)
+                            putExtra(ManicTimeService.EXTRA_RESULT_DATA, data)
+                        }
+                        startService(intent)
+                        Toast.makeText(this, "截图功能已启用", Toast.LENGTH_SHORT).show()
+                    }, 500)
+                } else {
+                    Toast.makeText(this, "授权数据为空", Toast.LENGTH_SHORT).show()
                 }
-                startService(intent)
-                Toast.makeText(this, "截图功能已启用", Toast.LENGTH_SHORT).show()
+            } else {
+                Toast.makeText(this, "需要截图权限才能启用截图功能", Toast.LENGTH_SHORT).show()
             }
-        } else {
-            Toast.makeText(this, "需要截图权限才能启用截图功能", Toast.LENGTH_SHORT).show()
+        } catch (e: Exception) {
+            Toast.makeText(this, "启动失败: ${e.message}", Toast.LENGTH_LONG).show()
+            android.util.Log.e("MainActivity", "Screenshot permission error", e)
         }
     }
     
