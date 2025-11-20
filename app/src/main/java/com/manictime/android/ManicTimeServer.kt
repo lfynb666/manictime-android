@@ -496,6 +496,7 @@ class ManicTimeService : Service() {
             Log.e(TAG, "清理截图资源失败", e)
         }
     }
+}
 
 // 数据类
 data class ActivityRecord(

@@ -676,7 +676,7 @@ class MainActivity : ComponentActivity() {
             startService(intent)
             
             // 等待截图完成
-            delay(3000)
+            kotlinx.coroutines.delay(3000)
             
             // 检查截图目录
             val screenshotManager = ScreenshotManager(this@MainActivity)
