@@ -640,22 +640,22 @@ class MainActivity : ComponentActivity() {
     
     private suspend fun testScreenshotCapture(): String = withContext(kotlinx.coroutines.Dispatchers.IO) {
         try {
-            // 检查是否有截图权限
-            val mediaProjectionManager = getSystemService(Context.MEDIA_PROJECTION_SERVICE) 
-                as? MediaProjectionManager
-                ?: return@withContext "❌ 无法获取MediaProjectionManager"
+            // 检查辅助功能是否启用
+            val isAccessibilityEnabled = isAccessibilityServiceEnabled()
             
             // 检查存储权限
-            val cacheDir = externalCacheDir ?: cacheDir
-            val testFile = java.io.File(cacheDir, "test_screenshot_${System.currentTimeMillis()}.jpg")
+            val screenshotManager = ScreenshotManager(this@MainActivity)
+            val screenshotsDir = screenshotManager.getScreenshotsDir()
+            val testFile = java.io.File(screenshotsDir, "test_${System.currentTimeMillis()}.jpg")
             
             // 尝试创建测试文件
             if (testFile.createNewFile()) {
                 testFile.delete()
                 return@withContext "✅ 截图功能准备就绪\n\n" +
-                    "保存路径: ${cacheDir.absolutePath}\n" +
-                    "文件名格式: screenshot_时间戳.jpg\n\n" +
-                    "⚠️ 注意: 实际截图需要先启动服务并授予屏幕录制权限"
+                    "辅助功能: ${if (isAccessibilityEnabled) "已启用 ✓" else "未启用 ✗"}\n" +
+                    "保存路径: ${screenshotsDir.absolutePath}\n" +
+                    "文件名格式: Screenshot_YYYY-MM-DD_HH-MM-SS.jpg\n\n" +
+                    "⚠️ 注意: ${if (!isAccessibilityEnabled) "请先启用辅助功能" else "截图将自动保存"}"
             } else {
                 return@withContext "❌ 无法创建文件，请检查存储权限"
             }

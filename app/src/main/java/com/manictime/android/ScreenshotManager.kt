@@ -90,6 +90,9 @@ class ScreenshotManager(private val context: Context) {
                 return@withContext null
             }
             
+            val width = originalBitmap.width
+            val height = originalBitmap.height
+            
             // 生成文件名
             val fileName = generateScreenshotFileName()
             val screenshotsDir = getScreenshotsDir()
