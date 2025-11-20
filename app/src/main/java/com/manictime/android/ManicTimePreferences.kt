@@ -24,6 +24,7 @@ class ManicTimePreferences(private val context: Context) {
         private const val KEY_ACTIVITY_INTERVAL = "activity_interval"
         private const val KEY_AUTO_START_ENABLED = "auto_start_enabled"
         private const val KEY_UPLOAD_ON_MOBILE_DATA = "upload_on_mobile_data"
+        private const val KEY_LAST_REPORT_PREFIX = "last_report_"
     }
     
     var serverUrl: String
@@ -98,5 +99,19 @@ class ManicTimePreferences(private val context: Context) {
     
     fun isAuthenticated(): Boolean {
         return accessToken.isNotEmpty()
+    }
+    
+    // 上报时间管理
+    fun setLastReportTime(module: String, timestamp: Long) {
+        prefs.edit().putLong(KEY_LAST_REPORT_PREFIX + module, timestamp).apply()
+    }
+    
+    fun getLastReportTime(module: String): Long {
+        return prefs.getLong(KEY_LAST_REPORT_PREFIX + module, 0L)
+    }
+    
+    fun getAllLastReportTimes(): Map<String, Long> {
+        val modules = listOf("applications", "screenshots", "device_state", "documents", "tags", "auto_tags", "server_tags")
+        return modules.associateWith { getLastReportTime(it) }
     }
 }

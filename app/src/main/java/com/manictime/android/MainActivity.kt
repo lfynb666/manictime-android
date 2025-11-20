@@ -134,6 +134,11 @@ class MainActivity : ComponentActivity() {
                 // 状态卡片
                 StatusCard(isAuthenticated, serviceRunning)
                 
+                // 数据上报监控面板
+                if (serviceRunning) {
+                    DataReportMonitorCard()
+                }
+                
                 // 服务器配置卡片
                 ServerConfigCard(
                     serverUrl = serverUrl,
@@ -964,5 +969,131 @@ class MainActivity : ComponentActivity() {
         }
         
         return@withContext result.toString()
+    }
+    
+    @Composable
+    fun DataReportMonitorCard() {
+        val scope = rememberCoroutineScope()
+        var lastReportTimes by remember { mutableStateOf(prefs.getAllLastReportTimes()) }
+        var isRefreshing by remember { mutableStateOf(false) }
+        
+        // 定期刷新显示时间
+        LaunchedEffect(Unit) {
+            while (true) {
+                kotlinx.coroutines.delay(1000) // 每秒刷新
+                // 从SharedPreferences重新读取
+                lastReportTimes = prefs.getAllLastReportTimes()
+            }
+        }
+        
+        Card(
+            modifier = Modifier.fillMaxWidth(),
+            colors = CardDefaults.cardColors(
+                containerColor = MaterialTheme.colorScheme.secondaryContainer
+            )
+        ) {
+            Column(
+                modifier = Modifier.padding(16.dp),
+                verticalArrangement = Arrangement.spacedBy(12.dp)
+            ) {
+                Text(
+                    text = "数据上报监控",
+                    style = MaterialTheme.typography.titleMedium,
+                    color = MaterialTheme.colorScheme.onSecondaryContainer
+                )
+                
+                Divider()
+                
+                // 各个模块的上报状态
+                val modules = listOf(
+                    "标签" to "tags",
+                    "自动标记" to "auto_tags",
+                    "状态" to "device_state",
+                    "程序" to "applications",
+                    "文档" to "documents",
+                    "屏幕截图" to "screenshots",
+                    "服务器标签" to "server_tags"
+                )
+                
+                modules.forEach { (name, key) ->
+                    ReportStatusRow(
+                        moduleName = name,
+                        lastReportTime = lastReportTimes[key] ?: 0L,
+                        onManualReport = {
+                            scope.launch {
+                                isRefreshing = true
+                                try {
+                                    // 触发手动上传
+                                    val intent = Intent(this@MainActivity, ManicTimeService::class.java).apply {
+                                        action = "MANUAL_UPLOAD_$key"
+                                    }
+                                    startService(intent)
+                                    Toast.makeText(this@MainActivity, "已触发${name}上传", Toast.LENGTH_SHORT).show()
+                                } finally {
+                                    isRefreshing = false
+                                }
+                            }
+                        }
+                    )
+                }
+            }
+        }
+    }
+    
+    @Composable
+    fun ReportStatusRow(
+        moduleName: String,
+        lastReportTime: Long,
+        onManualReport: () -> Unit
+    ) {
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Column(modifier = Modifier.weight(1f)) {
+                Text(
+                    text = moduleName,
+                    style = MaterialTheme.typography.bodyMedium
+                )
+            }
+            
+            Row(
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text(
+                    text = formatTimeSince(lastReportTime),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+                
+                IconButton(
+                    onClick = onManualReport,
+                    modifier = Modifier.size(32.dp)
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.Upload,
+                        contentDescription = "手动上传",
+                        tint = MaterialTheme.colorScheme.primary,
+                        modifier = Modifier.size(20.dp)
+                    )
+                }
+            }
+        }
+    }
+    
+    private fun formatTimeSince(timestamp: Long): String {
+        if (timestamp == 0L) return "从未"
+        
+        val now = System.currentTimeMillis()
+        val diff = now - timestamp
+        
+        return when {
+            diff < 60_000 -> "${diff / 1000} 秒前"
+            diff < 3600_000 -> "${diff / 60_000} 分钟前"
+            diff < 86400_000 -> "${diff / 3600_000} 小时前"
+            else -> "${diff / 86400_000} 天前"
+        }
     }
 }

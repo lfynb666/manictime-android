@@ -400,6 +400,9 @@ class ManicTimeService : Service() {
                 
                 Log.d(TAG, "上传了 ${activities.size} 条活动记录")
                 updateNotification("已同步 ${activities.size} 条活动")
+                
+                // 记录上报时间
+                prefs.setLastReportTime("applications", System.currentTimeMillis())
             } catch (e: Exception) {
                 Log.e(TAG, "上传活动失败", e)
                 // 失败则放回队列
@@ -419,6 +422,9 @@ class ManicTimeService : Service() {
                 
                 Log.d(TAG, "上传了 ${screenshots.size} 张截图")
                 updateNotification("已上传 ${screenshots.size} 张截图")
+                
+                // 记录上报时间
+                prefs.setLastReportTime("screenshots", System.currentTimeMillis())
             } catch (e: Exception) {
                 Log.e(TAG, "上传截图失败", e)
             }
@@ -483,7 +489,16 @@ class ManicTimeService : Service() {
                 if (result != null) {
                     val (originalFile, thumbnailFile) = result
                     screenshotManager.markForUpload(originalFile, thumbnailFile)
-                    Log.d(TAG, "截图已保存: ${originalFile.name}")
+                    
+                    // 加入上传队列
+                    val screenshotData = ScreenshotData(
+                        timestamp = System.currentTimeMillis(),
+                        originalPath = originalFile.absolutePath,
+                        thumbnailPath = thumbnailFile.absolutePath
+                    )
+                    screenshotQueue.add(screenshotData)
+                    
+                    Log.d(TAG, "截图已保存并加入队列: ${originalFile.name}, 队列大小: ${screenshotQueue.size}")
                 }
                 
                 file.delete()
@@ -561,7 +576,9 @@ data class ActivityRecord(
 
 data class ScreenshotData(
     val timestamp: Long,
-    val imageData: ByteArray
+    val imageData: ByteArray? = null,
+    val originalPath: String? = null,
+    val thumbnailPath: String? = null
 ) {
     override fun equals(other: Any?): Boolean {
         if (this === other) return true
