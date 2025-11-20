@@ -309,6 +309,20 @@ class MainActivity : ComponentActivity() {
                         style = MaterialTheme.typography.bodyMedium
                     )
                 }
+                
+                // 日志查看按钮
+                val context = LocalContext.current
+                Button(
+                    onClick = {
+                        val intent = Intent(context, LogViewerActivity::class.java)
+                        context.startActivity(intent)
+                    },
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Icon(Icons.Default.List, null)
+                    Spacer(Modifier.width(8.dp))
+                    Text("查看实时日志")
+                }
             }
         }
     }

@@ -50,6 +50,12 @@
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
         </activity>
+        
+        <!-- 日志查看Activity -->
+        <activity
+            android:name=".LogViewerActivity"
+            android:exported="false"
+            android:theme="@android:style/Theme.Material.Light.NoActionBar" />
 
         <!-- 前台服务 - 包含截图功能 -->
         <service

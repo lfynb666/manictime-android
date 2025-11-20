@@ -92,6 +92,7 @@ class ManicTimeService : Service() {
     override fun onCreate() {
         super.onCreate()
         Log.d(TAG, "Service onCreate")
+        AppLogger.i(TAG, "📱 ManicTime服务创建")
         instance = this
         
         prefs = ManicTimePreferences(this)
@@ -100,6 +101,7 @@ class ManicTimeService : Service() {
         
         createNotificationChannel()
         isRunning = true
+        AppLogger.i(TAG, "✅ 服务初始化完成")
     }
     
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
@@ -243,14 +245,18 @@ class ManicTimeService : Service() {
     
     private fun startMonitoring() {
         Log.d(TAG, "开始监控")
+        AppLogger.i(TAG, "🚀 开始监控服务")
         
         // 初始化timeline
         serviceScope.launch {
             try {
+                AppLogger.i(TAG, "📊 获取Timeline...")
                 timelineKey = apiClient.getOrCreateTimeline()
                 Log.d(TAG, "Timeline Key: $timelineKey")
+                AppLogger.i(TAG, "✅ Timeline获取成功: $timelineKey")
             } catch (e: Exception) {
                 Log.e(TAG, "获取timeline失败", e)
+                AppLogger.e(TAG, "❌ 获取Timeline失败: ${e.message}", e)
             }
         }
         
@@ -407,9 +413,11 @@ class ManicTimeService : Service() {
     
     private suspend fun uploadPendingData() = withContext(Dispatchers.IO) {
         Log.d(TAG, "uploadPendingData 开始 - timelineKey: $timelineKey, activityQueue: ${activityQueue.size}, screenshotQueue: ${screenshotQueue.size}")
+        AppLogger.i(TAG, "📤 开始上传数据 - Timeline: $timelineKey, 活动: ${activityQueue.size}, 截图: ${screenshotQueue.size}")
         
         if (timelineKey == null) {
             Log.w(TAG, "Timeline未初始化,跳过上传")
+            AppLogger.w(TAG, "⚠️ Timeline未初始化，跳过上传")
             return@withContext
         }
         
@@ -418,12 +426,14 @@ class ManicTimeService : Service() {
             val activities = activityQueue.toList()
             try {
                 Log.d(TAG, "准备上传 ${activities.size} 条活动记录")
+                AppLogger.i(TAG, "📊 上传 ${activities.size} 条活动记录...")
                 activityQueue.clear()
                 
                 // 批量上传（使用activityupdates API）
                 apiClient.uploadActivities(timelineKey!!, activities)
                 
                 Log.d(TAG, "✅ 成功上传了 ${activities.size} 条活动记录")
+                AppLogger.i(TAG, "✅ 活动上传成功: ${activities.size} 条")
                 updateNotification("已同步 ${activities.size} 条活动")
                 
                 // 记录上报时间
@@ -431,6 +441,7 @@ class ManicTimeService : Service() {
                 Log.d(TAG, "已记录applications上报时间")
             } catch (e: Exception) {
                 Log.e(TAG, "❌ 上传活动失败: ${e.message}", e)
+                AppLogger.e(TAG, "❌ 活动上传失败: ${e.message}", e)
                 // 失败则放回队列
                 activityQueue.addAll(0, activities)
             }
