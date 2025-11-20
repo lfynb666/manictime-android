@@ -202,7 +202,16 @@ class ManicTimeApiClient(private val prefs: ManicTimePreferences) {
         
         Log.d(TAG, "上传 ${activities.size} 条活动记录")
         Log.d(TAG, "请求体: ${json.toString(2)}")
-        post(url, json.toString(), CONTENT_TYPE_JSON)
+        AppLogger.i(TAG, "📤 上传URL: $url")
+        AppLogger.i(TAG, "📦 请求体大小: ${json.toString().length} 字节")
+        
+        try {
+            post(url, json.toString(), CONTENT_TYPE_JSON)
+            AppLogger.i(TAG, "✅ 活动上传API调用成功")
+        } catch (e: Exception) {
+            AppLogger.e(TAG, "❌ 活动上传API失败", e)
+            throw e
+        }
     }
     
     /**

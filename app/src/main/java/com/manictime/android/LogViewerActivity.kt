@@ -10,7 +10,12 @@ import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ArrowBack
 import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material3.*
+import android.content.ClipData
+import android.content.ClipboardManager
+import android.content.Context
+import android.widget.Toast
 import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
@@ -39,6 +44,7 @@ class LogViewerActivity : ComponentActivity() {
 fun LogViewerScreen(onBack: () -> Unit) {
     var logs by remember { mutableStateOf(AppLogger.getLogs()) }
     val listState = rememberLazyListState()
+    val context = androidx.compose.ui.platform.LocalContext.current
     
     // 自动刷新日志
     LaunchedEffect(Unit) {
@@ -65,6 +71,17 @@ fun LogViewerScreen(onBack: () -> Unit) {
                     }
                 },
                 actions = {
+                    IconButton(onClick = {
+                        val allLogs = logs.joinToString("\n") { log ->
+                            "${log.time} ${log.level} ${log.tag}: ${log.message}" +
+                                if (log.throwable != null) "\n${log.throwable}" else ""
+                        }
+                        val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+                        clipboard.setPrimaryClip(ClipData.newPlainText("ManicTime Logs", allLogs))
+                        Toast.makeText(context, "已复制 ${logs.size} 条日志", Toast.LENGTH_SHORT).show()
+                    }) {
+                        Icon(Icons.Default.ContentCopy, "复制全部")
+                    }
                     IconButton(onClick = { AppLogger.clear() }) {
                         Icon(Icons.Default.Delete, "清空")
                     }
