@@ -639,83 +639,231 @@ class MainActivity : ComponentActivity() {
     }
     
     private suspend fun testScreenshotCapture(): String = withContext(kotlinx.coroutines.Dispatchers.IO) {
+        val result = StringBuilder()
+        result.append("🔍 穷尽所有截图方法测试\n")
+        result.append("=" .repeat(40) + "\n\n")
+        
+        val timestamp = System.currentTimeMillis()
+        val cacheDir = externalCacheDir ?: cacheDir
+        val screenshotManager = ScreenshotManager(this@MainActivity)
+        var successMethod: String? = null
+        var successFile: java.io.File? = null
+        
+        // ========== 方法1: screencap直接执行 ==========
+        result.append("📸 方法1: screencap直接执行\n")
         try {
-            val result = StringBuilder()
-            result.append("🔍 正在执行截图测试...\n\n")
+            val file1 = java.io.File(cacheDir, "test_method1_$timestamp.png")
+            val process1 = ProcessBuilder()
+                .command("screencap", "-p", file1.absolutePath)
+                .redirectErrorStream(true)
+                .start()
+            val exitCode1 = process1.waitFor()
+            val output1 = process1.inputStream.bufferedReader().readText()
             
-            // 1. 检查辅助功能
-            val isAccessibilityEnabled = isAccessibilityServiceEnabled()
-            result.append("📱 辅助功能: ${if (isAccessibilityEnabled) "✅ 已启用" else "❌ 未启用"}\n")
+            result.append("   exitCode: $exitCode1\n")
+            if (output1.isNotEmpty()) result.append("   输出: ${output1.take(100)}\n")
             
-            if (!isAccessibilityEnabled) {
-                result.append("\n❌ 请先在系统设置中启用ManicTime辅助功能")
-                return@withContext result.toString()
+            if (file1.exists() && file1.length() > 0) {
+                result.append("   ✅ 成功! 大小: ${file1.length() / 1024}KB\n")
+                successMethod = "方法1"
+                successFile = file1
+            } else {
+                result.append("   ❌ 失败\n")
+                file1.delete()
             }
-            
-            // 2. 检查辅助功能服务是否运行
-            val service = ScreenCaptureAccessibilityService.getInstance()
-            val serviceRunning = service != null
-            result.append("🔧 服务状态: ${if (serviceRunning) "✅ 运行中" else "❌ 未运行"}\n")
-            
-            if (!serviceRunning) {
-                result.append("\n❌ 辅助功能服务未运行，请重启应用")
-                return@withContext result.toString()
-            }
-            
-            // 3. 检查存储路径
-            val screenshotManager = ScreenshotManager(this@MainActivity)
-            val screenshotsDir = screenshotManager.getScreenshotsDir()
-            result.append("💾 保存路径: ${screenshotsDir.absolutePath}\n\n")
-            
-            // 4. 立即执行截图测试
-            result.append("📸 正在执行截图...\n")
-            
+        } catch (e: Exception) {
+            result.append("   ❌ 异常: ${e.message}\n")
+        }
+        result.append("\n")
+        
+        // ========== 方法2: screencap通过sh ==========
+        if (successFile == null) {
+            result.append("📸 方法2: screencap通过sh\n")
             try {
-                // 使用screencap命令截图
-                val timestamp = System.currentTimeMillis()
-                val cacheDir = externalCacheDir ?: cacheDir
-                val tempFile = java.io.File(cacheDir, "test_screenshot_$timestamp.png")
+                val file2 = java.io.File(cacheDir, "test_method2_$timestamp.png")
+                val process2 = Runtime.getRuntime().exec(arrayOf(
+                    "sh", "-c", "screencap -p ${file2.absolutePath}"
+                ))
+                val exitCode2 = process2.waitFor()
                 
-                val process = Runtime.getRuntime().exec(
-                    arrayOf("screencap", "-p", tempFile.absolutePath)
-                )
-                process.waitFor()
+                result.append("   exitCode: $exitCode2\n")
                 
-                if (tempFile.exists() && tempFile.length() > 0) {
-                    result.append("✅ 截图命令执行成功！\n")
-                    result.append("📏 临时文件大小: ${tempFile.length() / 1024}KB\n\n")
-                    
-                    // 使用ScreenshotManager保存
-                    result.append("💾 正在保存截图...\n")
-                    val savedResult = screenshotManager.saveScreenshot(tempFile)
-                    
-                    if (savedResult != null) {
-                        val (originalFile, thumbnailFile) = savedResult
-                        result.append("✅ 截图保存成功！\n\n")
-                        result.append("📄 原图: ${originalFile.name}\n")
-                        result.append("   大小: ${originalFile.length() / 1024}KB\n")
-                        result.append("📄 缩略图: ${thumbnailFile.name}\n")
-                        result.append("   大小: ${thumbnailFile.length() / 1024}KB\n\n")
-                        result.append("🎉 测试成功！请到以下路径查看:\n${screenshotsDir.absolutePath}")
-                    } else {
-                        result.append("❌ 保存失败")
-                    }
-                    
-                    // 清理临时文件
-                    tempFile.delete()
+                if (file2.exists() && file2.length() > 0) {
+                    result.append("   ✅ 成功! 大小: ${file2.length() / 1024}KB\n")
+                    successMethod = "方法2"
+                    successFile = file2
                 } else {
-                    result.append("❌ 截图命令执行失败\n")
-                    result.append("可能原因: 系统不允许使用screencap命令\n")
-                    result.append("建议: 尝试授予应用更多权限或使用root权限")
+                    result.append("   ❌ 失败\n")
+                    file2.delete()
                 }
             } catch (e: Exception) {
-                result.append("❌ 截图失败: ${e.message}\n")
-                result.append("详细错误: ${e.stackTraceToString()}")
+                result.append("   ❌ 异常: ${e.message}\n")
+            }
+            result.append("\n")
+        }
+        
+        // ========== 方法3: screencap输出到stdout再重定向 ==========
+        if (successFile == null) {
+            result.append("📸 方法3: screencap输出到stdout\n")
+            try {
+                val file3 = java.io.File(cacheDir, "test_method3_$timestamp.png")
+                val process3 = Runtime.getRuntime().exec("screencap -p")
+                val imageData = process3.inputStream.readBytes()
+                process3.waitFor()
+                
+                if (imageData.isNotEmpty()) {
+                    file3.writeBytes(imageData)
+                    result.append("   数据大小: ${imageData.size / 1024}KB\n")
+                    
+                    if (file3.exists() && file3.length() > 0) {
+                        result.append("   ✅ 成功! 大小: ${file3.length() / 1024}KB\n")
+                        successMethod = "方法3"
+                        successFile = file3
+                    } else {
+                        result.append("   ❌ 文件写入失败\n")
+                        file3.delete()
+                    }
+                } else {
+                    result.append("   ❌ 无数据输出\n")
+                }
+            } catch (e: Exception) {
+                result.append("   ❌ 异常: ${e.message}\n")
+            }
+            result.append("\n")
+        }
+        
+        // ========== 方法4: su权限执行screencap ==========
+        if (successFile == null) {
+            result.append("📸 方法4: su权限执行screencap (需要ROOT)\n")
+            try {
+                val file4 = java.io.File(cacheDir, "test_method4_$timestamp.png")
+                val process4 = Runtime.getRuntime().exec(arrayOf(
+                    "su", "-c", "screencap -p ${file4.absolutePath}"
+                ))
+                val exitCode4 = process4.waitFor()
+                
+                result.append("   exitCode: $exitCode4\n")
+                
+                if (file4.exists() && file4.length() > 0) {
+                    result.append("   ✅ 成功! 大小: ${file4.length() / 1024}KB\n")
+                    result.append("   ⚠️ 设备已ROOT\n")
+                    successMethod = "方法4 (ROOT)"
+                    successFile = file4
+                } else {
+                    result.append("   ❌ 失败 (设备可能未ROOT)\n")
+                    file4.delete()
+                }
+            } catch (e: Exception) {
+                result.append("   ❌ 异常: ${e.message}\n")
+            }
+            result.append("\n")
+        }
+        
+        // ========== 方法5: /system/bin/screencap完整路径 ==========
+        if (successFile == null) {
+            result.append("📸 方法5: 使用完整路径\n")
+            try {
+                val file5 = java.io.File(cacheDir, "test_method5_$timestamp.png")
+                val process5 = Runtime.getRuntime().exec(
+                    "/system/bin/screencap -p ${file5.absolutePath}"
+                )
+                val exitCode5 = process5.waitFor()
+                
+                result.append("   exitCode: $exitCode5\n")
+                
+                if (file5.exists() && file5.length() > 0) {
+                    result.append("   ✅ 成功! 大小: ${file5.length() / 1024}KB\n")
+                    successMethod = "方法5"
+                    successFile = file5
+                } else {
+                    result.append("   ❌ 失败\n")
+                    file5.delete()
+                }
+            } catch (e: Exception) {
+                result.append("   ❌ 异常: ${e.message}\n")
+            }
+            result.append("\n")
+        }
+        
+        // ========== 方法6: 检查screencap是否存在 ==========
+        result.append("📸 方法6: 检查screencap命令\n")
+        try {
+            val whichProcess = Runtime.getRuntime().exec("which screencap")
+            val screencapPath = whichProcess.inputStream.bufferedReader().readText().trim()
+            whichProcess.waitFor()
+            
+            if (screencapPath.isNotEmpty()) {
+                result.append("   screencap路径: $screencapPath\n")
+                
+                // 检查文件权限
+                val lsProcess = Runtime.getRuntime().exec("ls -l $screencapPath")
+                val permissions = lsProcess.inputStream.bufferedReader().readText().trim()
+                lsProcess.waitFor()
+                result.append("   权限: $permissions\n")
+            } else {
+                result.append("   ❌ 找不到screencap命令\n")
+            }
+        } catch (e: Exception) {
+            result.append("   ❌ 异常: ${e.message}\n")
+        }
+        result.append("\n")
+        
+        // ========== 方法7: 检查当前进程权限 ==========
+        result.append("📸 方法7: 检查当前进程信息\n")
+        try {
+            val uid = android.os.Process.myUid()
+            val pid = android.os.Process.myPid()
+            result.append("   UID: $uid\n")
+            result.append("   PID: $pid\n")
+            result.append("   包名: ${packageName}\n")
+            
+            // 检查SELinux状态
+            val selinuxProcess = Runtime.getRuntime().exec("getenforce")
+            val selinuxStatus = selinuxProcess.inputStream.bufferedReader().readText().trim()
+            selinuxProcess.waitFor()
+            result.append("   SELinux: $selinuxStatus\n")
+        } catch (e: Exception) {
+            result.append("   ❌ 异常: ${e.message}\n")
+        }
+        result.append("\n")
+        
+        // ========== 总结 ==========
+        result.append("=" .repeat(40) + "\n")
+        result.append("📊 测试总结\n\n")
+        
+        if (successFile != null && successMethod != null) {
+            result.append("🎉 找到可用方法: $successMethod\n\n")
+            
+            // 保存截图
+            result.append("💾 正在保存截图...\n")
+            val savedResult = screenshotManager.saveScreenshot(successFile)
+            
+            if (savedResult != null) {
+                val (originalFile, thumbnailFile) = savedResult
+                result.append("✅ 截图保存成功！\n\n")
+                result.append("📄 原图: ${originalFile.name}\n")
+                result.append("   大小: ${originalFile.length() / 1024}KB\n")
+                result.append("📄 缩略图: ${thumbnailFile.name}\n")
+                result.append("   大小: ${thumbnailFile.length() / 1024}KB\n\n")
+                result.append("📂 保存路径:\n${screenshotManager.getScreenshotsDir().absolutePath}\n\n")
+                result.append("✨ 建议: 在代码中使用 $successMethod")
+            } else {
+                result.append("❌ 保存失败")
             }
             
-            return@withContext result.toString()
-        } catch (e: Exception) {
-            return@withContext "❌ 测试失败: ${e.message}\n\n堆栈: ${e.stackTraceToString()}"
+            // 清理临时文件
+            successFile.delete()
+        } else {
+            result.append("❌ 所有方法都失败了\n\n")
+            result.append("可能原因:\n")
+            result.append("1. 设备不支持screencap命令\n")
+            result.append("2. 需要ROOT权限\n")
+            result.append("3. SELinux策略阻止\n")
+            result.append("4. 需要使用MediaProjection API\n\n")
+            result.append("💡 建议: 使用MediaProjection API\n")
+            result.append("   (需要用户授权，但最可靠)")
         }
+        
+        return@withContext result.toString()
     }
 }

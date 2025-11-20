@@ -1,18 +1,19 @@
 package com.manictime.android
 
 import android.accessibilityservice.AccessibilityService
+import android.content.Context
 import android.graphics.Bitmap
-import android.graphics.PixelFormat
-import android.hardware.display.DisplayManager
-import android.hardware.display.VirtualDisplay
-import android.media.ImageReader
-import android.media.projection.MediaProjection
+import android.graphics.Canvas
+import android.os.Build
 import android.os.Handler
 import android.os.Looper
 import android.util.DisplayMetrics
 import android.util.Log
+import android.view.PixelCopy
+import android.view.SurfaceView
 import android.view.WindowManager
 import android.view.accessibility.AccessibilityEvent
+import androidx.annotation.RequiresApi
 import kotlinx.coroutines.*
 import java.io.ByteArrayOutputStream
 import java.io.File
@@ -130,23 +131,40 @@ class ScreenCaptureAccessibilityService : AccessibilityService() {
             val cacheDir = externalCacheDir ?: cacheDir
             val screenshotFile = File(cacheDir, "screenshot_$timestamp.jpg")
             
-            // 使用系统截图命令（需要辅助功能权限）
+            // 尝试使用screencap命令截图
             withContext(Dispatchers.IO) {
                 try {
-                    // 使用screencap命令（最可靠）
-                    val process = Runtime.getRuntime().exec(
-                        arrayOf("screencap", "-p", screenshotFile.absolutePath)
-                    )
-                    process.waitFor()
+                    // 方法1: 尝试直接执行screencap
+                    val process = ProcessBuilder()
+                        .command("screencap", "-p", screenshotFile.absolutePath)
+                        .redirectErrorStream(true)
+                        .start()
+                    
+                    val exitCode = process.waitFor()
+                    val output = process.inputStream.bufferedReader().readText()
+                    
+                    Log.d(TAG, "screencap exitCode: $exitCode, output: $output")
                     
                     if (screenshotFile.exists() && screenshotFile.length() > 0) {
                         Log.d(TAG, "截图成功: ${screenshotFile.absolutePath}, 大小: ${screenshotFile.length() / 1024}KB")
-                        
-                        // 保存截图（原图 + 缩略图）
                         notifyScreenshotReady(screenshotFile)
                     } else {
-                        Log.w(TAG, "截图文件为空")
-                        screenshotFile.delete()
+                        Log.w(TAG, "screencap失败，尝试使用sh命令")
+                        
+                        // 方法2: 通过sh执行
+                        val shProcess = Runtime.getRuntime().exec(arrayOf(
+                            "sh", "-c", "screencap -p ${screenshotFile.absolutePath}"
+                        ))
+                        shProcess.waitFor()
+                        
+                        if (screenshotFile.exists() && screenshotFile.length() > 0) {
+                            Log.d(TAG, "通过sh截图成功")
+                            notifyScreenshotReady(screenshotFile)
+                        } else {
+                            Log.e(TAG, "所有截图方法都失败了")
+                            Log.e(TAG, "这个设备可能不支持screencap命令，或需要ROOT权限")
+                            screenshotFile.delete()
+                        }
                     }
                 } catch (e: Exception) {
                     Log.e(TAG, "截图命令执行失败", e)
