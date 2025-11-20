@@ -62,7 +62,7 @@ class ManicTimeService : Service() {
     
     // 应用监控
     private var activityMonitorJob: Job? = null
-    private var lastActiveApp: String? = null
+    private var lastActiveApp: String? = null  // 存储packageName
     private var lastActivityTime = 0L
     
     // 截图相关
@@ -369,23 +369,32 @@ class ManicTimeService : Service() {
                 if (packageName != lastActiveApp || 
                     (currentTime - lastActivityTime) > ACTIVITY_CHECK_INTERVAL) {
                     
-                    if (lastActiveApp != null) {
+                    if (lastActiveApp != null && lastActivityTime > 0) {
                         // 保存上一个活动
                         val duration = (currentTime - lastActivityTime) / 1000 // 秒
                         if (duration > 0) {
+                            // 获取上一个应用的名称
+                            val prevAppName = try {
+                                val pm = packageManager
+                                val appInfo = pm.getApplicationInfo(lastActiveApp!!, 0)
+                                pm.getApplicationLabel(appInfo).toString()
+                            } catch (e: Exception) {
+                                lastActiveApp!!
+                            }
+                            
                             activityQueue.add(
                                 ActivityRecord(
-                                    appName = lastActiveApp!!,
+                                    appName = prevAppName,
                                     packageName = lastActiveApp!!,
                                     startTime = lastActivityTime,
                                     duration = duration
                                 )
                             )
-                            Log.d(TAG, "记录活动: $lastActiveApp, 时长: ${duration}秒")
+                            Log.d(TAG, "✅ 记录活动: $prevAppName (${lastActiveApp}), 时长: ${duration}秒, 队列: ${activityQueue.size}")
                         }
                     }
                     
-                    lastActiveApp = appName
+                    lastActiveApp = packageName  // 保存packageName而不是appName
                     lastActivityTime = currentTime
                 }
             }
@@ -409,10 +418,8 @@ class ManicTimeService : Service() {
                 Log.d(TAG, "准备上传 ${activities.size} 条活动记录")
                 activityQueue.clear()
                 
-                for (activity in activities) {
-                    Log.d(TAG, "上传活动: ${activity.appName}, 时长: ${activity.duration}秒")
-                    apiClient.uploadActivity(timelineKey!!, activity)
-                }
+                // 批量上传（使用activityupdates API）
+                apiClient.uploadActivities(timelineKey!!, activities)
                 
                 Log.d(TAG, "✅ 成功上传了 ${activities.size} 条活动记录")
                 updateNotification("已同步 ${activities.size} 条活动")
@@ -423,7 +430,7 @@ class ManicTimeService : Service() {
             } catch (e: Exception) {
                 Log.e(TAG, "❌ 上传活动失败: ${e.message}", e)
                 // 失败则放回队列
-                activityQueue.addAll(0, activityQueue)
+                activityQueue.addAll(0, activities)
             }
         } else {
             Log.d(TAG, "活动队列为空，跳过")

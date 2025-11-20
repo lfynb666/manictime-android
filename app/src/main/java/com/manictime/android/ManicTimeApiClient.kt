@@ -143,29 +143,77 @@ class ManicTimeApiClient(private val prefs: ManicTimePreferences) {
     }
     
     /**
-     * 上传活动记录
+     * 批量上传活动记录（使用activityupdates API）
      */
-    suspend fun uploadActivity(
+    suspend fun uploadActivities(
         timelineKey: String,
-        activity: ActivityRecord
+        activities: List<ActivityRecord>
     ) = withContext(Dispatchers.IO) {
-        val url = "${prefs.serverUrl}/api/timelines/$timelineKey/activities"
+        val url = "${prefs.serverUrl}/api/timelines/$timelineKey/activityupdates"
         
-        val startTime = dateFormat.format(Date(activity.startTime))
+        // 构建ClientEnvironment
+        val clientEnvironment = JSONObject().apply {
+            put("applicationName", "ManicTime Android")
+            put("applicationVersion", "1.0.0")
+            put("databaseId", "android-${android.os.Build.MODEL}")
+            put("deviceName", "Android-${android.os.Build.MODEL}")
+            put("operatingSystem", "Android")
+            put("operatingSystemVersion", android.os.Build.VERSION.RELEASE)
+        }
         
-        val json = JSONObject().apply {
-            put("values", JSONObject().apply {
-                put("name", activity.appName)
-                put("notes", "Android应用: ${activity.packageName}")
-                put("timeInterval", JSONObject().apply {
-                    put("start", startTime)
-                    put("duration", activity.duration.toInt())
-                })
+        // 构建groups（按packageName去重）
+        val groupsMap = mutableMapOf<String, String>()
+        activities.forEach { activity ->
+            groupsMap[activity.packageName] = activity.appName
+        }
+        
+        val groupsArray = JSONArray()
+        groupsMap.forEach { (packageName, appName) ->
+            groupsArray.put(JSONObject().apply {
+                put("groupId", packageName)
+                put("displayName", appName)
+                put("displayKey", packageName)
+                put("color", generateColorForPackage(packageName))
+                put("skipColor", false)
             })
         }
         
-        Log.d(TAG, "上传活动: ${json.toString(2)}")
+        // 构建activities
+        val activitiesArray = JSONArray()
+        activities.forEachIndexed { index, activity ->
+            val startTime = dateFormat.format(Date(activity.startTime))
+            val endTime = dateFormat.format(Date(activity.startTime + activity.duration * 1000))
+            
+            activitiesArray.put(JSONObject().apply {
+                put("activityId", "android_${activity.startTime}_$index")
+                put("displayName", activity.appName)
+                put("groupId", activity.packageName)
+                put("startTime", startTime)
+                put("endTime", endTime)
+            })
+        }
+        
+        val json = JSONObject().apply {
+            put("clientEnvironment", clientEnvironment)
+            put("timelineKey", timelineKey)
+            put("groups", groupsArray)
+            put("activities", activitiesArray)
+        }
+        
+        Log.d(TAG, "上传 ${activities.size} 条活动记录")
+        Log.d(TAG, "请求体: ${json.toString(2)}")
         post(url, json.toString(), CONTENT_TYPE_JSON)
+    }
+    
+    /**
+     * 为包名生成颜色
+     */
+    private fun generateColorForPackage(packageName: String): String {
+        val hash = packageName.hashCode()
+        val r = (hash and 0xFF0000) shr 16
+        val g = (hash and 0x00FF00) shr 8
+        val b = hash and 0x0000FF
+        return String.format("%02X%02X%02X", r, g, b)
     }
     
     /**
