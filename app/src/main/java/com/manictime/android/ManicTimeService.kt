@@ -427,13 +427,15 @@ class ManicTimeService : Service() {
         // 上传活动记录
         if (activityQueue.isNotEmpty()) {
             val activities = activityQueue.toList()
+            val currentTimelineKey = timelineKey
+            val currentLastChangeId = lastChangeId
             try {
                 Log.d(TAG, "准备上传 ${activities.size} 条活动记录")
                 AppLogger.i(TAG, "📊 上传 ${activities.size} 条活动记录...")
                 activityQueue.clear()
                 
-                // 批量上传（使用activityupdates API）
-                apiClient.uploadActivities(timelineKey, lastChangeId, activities)
+                // 批量上传（使用changes API）
+                apiClient.uploadActivities(currentTimelineKey!!, currentLastChangeId, activities)
                 
                 Log.d(TAG, "✅ 成功上传了 ${activities.size} 条活动记录")
                 AppLogger.i(TAG, "✅ 活动上传成功: ${activities.size} 条")
