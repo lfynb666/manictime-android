@@ -444,6 +444,18 @@ class ManicTimeService : Service() {
                 AppLogger.i(TAG, "✅ 活动上传成功: ${activities.size} 条")
                 updateNotification("已同步 ${activities.size} 条活动")
                 
+                // 上传成功后，重新获取timeline以更新lastChangeId
+                try {
+                    val (key, changeId, envId) = apiClient.getOrCreateTimeline()
+                    timelineKey = key
+                    lastChangeId = changeId
+                    environmentId = envId
+                    Log.d(TAG, "✅ 更新lastChangeId: $lastChangeId")
+                    AppLogger.i(TAG, "✅ 更新lastChangeId: $lastChangeId")
+                } catch (e: Exception) {
+                    Log.e(TAG, "更新lastChangeId失败", e)
+                }
+                
                 // 记录上报时间
                 prefs.setLastReportTime("applications", System.currentTimeMillis())
                 Log.d(TAG, "已记录applications上报时间")
