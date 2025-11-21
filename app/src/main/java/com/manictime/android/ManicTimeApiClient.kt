@@ -69,34 +69,73 @@ class ManicTimeApiClient(private val prefs: ManicTimePreferences) {
     
     /**
      * 获取或创建当前设备的Timeline
-     * 返回: Pair(timelineKey, lastChangeId)
+     * 返回: Triple(timelineKey, lastChangeId, environmentId)
      */
-    suspend fun getOrCreateTimeline(): Pair<String, String?> = withContext(Dispatchers.IO) {
+    suspend fun getOrCreateTimeline(): Triple<String, String?, String> = withContext(Dispatchers.IO) {
         // 1. 获取所有timeline
         val timelinesUrl = "${prefs.serverUrl}/api/timelines"
         val response = get(timelinesUrl)
         val json = JSONObject(response)
         
         val timelines = json.getJSONArray("timelines")
-        val deviceName = "Android-${android.os.Build.MODEL}"
+        val currentDeviceName = android.os.Build.MODEL
         
         // 2. 打印所有timeline类型和links
         Log.d(TAG, "=== 可用的Timeline列表 ===")
-        AppLogger.i(TAG, "可用的Timeline列表:")
+        AppLogger.i(TAG, "可用的Timeline列表 (当前设备MODEL: '$currentDeviceName'):")
         for (i in 0 until timelines.length()) {
             val timeline = timelines.getJSONObject(i)
             val schema = timeline.getJSONObject("schema")
             val schemaName = schema.getString("name")
             val timelineKey = timeline.getString("timelineKey")
-            val links = timeline.optJSONObject("links")
-            Log.d(TAG, "Timeline $i: $schemaName -> $timelineKey")
-            AppLogger.i(TAG, "  [$i] $schemaName -> $timelineKey")
-            if (links != null) {
-                AppLogger.i(TAG, "      Links: ${links.keys().asSequence().toList()}")
+            val homeEnv = timeline.getJSONObject("homeEnvironment")
+            val deviceName = homeEnv.getString("deviceName")
+            Log.d(TAG, "Timeline $i: $schemaName -> $timelineKey (设备: $deviceName)")
+            AppLogger.i(TAG, "  [$i] $schemaName -> $timelineKey (设备: '$deviceName')")
+        }
+        
+        // 3. 优先查找当前设备的Applications timeline (使用包含匹配)
+        for (i in 0 until timelines.length()) {
+            val timeline = timelines.getJSONObject(i)
+            val schema = timeline.getJSONObject("schema")
+            val schemaName = schema.getString("name")
+            val homeEnv = timeline.getJSONObject("homeEnvironment")
+            val deviceName = homeEnv.getString("deviceName")
+            
+            // 使用包含匹配：deviceName包含currentDeviceName 或 currentDeviceName包含deviceName
+            if (schemaName == "ManicTime/Applications" && 
+                (deviceName.contains(currentDeviceName, ignoreCase = true) || 
+                 currentDeviceName.contains(deviceName, ignoreCase = true))) {
+                val timelineKey = timeline.getString("timelineKey")
+                val lastChangeId = if (timeline.has("lastChangeId")) timeline.getString("lastChangeId") else null
+                val environmentId = homeEnv.getString("environmentId")
+                Log.d(TAG, "使用当前设备的Applications timeline: $timelineKey")
+                AppLogger.i(TAG, "✅ 使用当前设备($currentDeviceName)的Applications timeline")
+                return@withContext Triple(timelineKey, lastChangeId, environmentId)
             }
         }
         
-        // 3. 查找Applications timeline (用于应用使用记录)
+        // 4. 如果没有当前设备的Applications，查找当前设备的ComputerUsage
+        for (i in 0 until timelines.length()) {
+            val timeline = timelines.getJSONObject(i)
+            val schema = timeline.getJSONObject("schema")
+            val schemaName = schema.getString("name")
+            val homeEnv = timeline.getJSONObject("homeEnvironment")
+            val deviceName = homeEnv.getString("deviceName")
+            
+            if (schemaName == "ManicTime/ComputerUsage" && 
+                (deviceName.contains(currentDeviceName, ignoreCase = true) || 
+                 currentDeviceName.contains(deviceName, ignoreCase = true))) {
+                val timelineKey = timeline.getString("timelineKey")
+                val lastChangeId = if (timeline.has("lastChangeId")) timeline.getString("lastChangeId") else null
+                val environmentId = homeEnv.getString("environmentId")
+                Log.d(TAG, "使用当前设备的ComputerUsage timeline: $timelineKey")
+                AppLogger.i(TAG, "✅ 使用当前设备($currentDeviceName)的ComputerUsage timeline")
+                return@withContext Triple(timelineKey, lastChangeId, environmentId)
+            }
+        }
+        
+        // 如果没有找到当前设备的timeline，再找Applications
         for (i in 0 until timelines.length()) {
             val timeline = timelines.getJSONObject(i)
             val schema = timeline.getJSONObject("schema")
@@ -105,9 +144,11 @@ class ManicTimeApiClient(private val prefs: ManicTimePreferences) {
             // 优先查找Applications类型的timeline
             if (schemaName == "ManicTime/Applications") {
                 val timelineKey = timeline.getString("timelineKey")
-                val lastChangeId = timeline.optString("lastChangeId", null)
-                Log.d(TAG, "使用Applications timeline: $timelineKey, lastChangeId: $lastChangeId")
-                return@withContext Pair(timelineKey, lastChangeId)
+                val lastChangeId = if (timeline.has("lastChangeId")) timeline.getString("lastChangeId") else null
+                val homeEnv = timeline.getJSONObject("homeEnvironment")
+                val environmentId = homeEnv.getString("environmentId")
+                Log.d(TAG, "使用Applications timeline: $timelineKey, lastChangeId: $lastChangeId, envId: $environmentId")
+                return@withContext Triple(timelineKey, lastChangeId, environmentId)
             }
         }
         
@@ -119,9 +160,11 @@ class ManicTimeApiClient(private val prefs: ManicTimePreferences) {
             
             if (schemaName.contains("Computer usage", ignoreCase = true)) {
                 val timelineKey = timeline.getString("timelineKey")
-                val lastChangeId = timeline.optString("lastChangeId", null)
+                val lastChangeId = if (timeline.has("lastChangeId")) timeline.getString("lastChangeId") else null
+                val homeEnv = timeline.getJSONObject("homeEnvironment")
+                val environmentId = homeEnv.getString("environmentId")
                 Log.d(TAG, "使用Computer Usage timeline: $timelineKey")
-                return@withContext Pair(timelineKey, lastChangeId)
+                return@withContext Triple(timelineKey, lastChangeId, environmentId)
             }
         }
         
@@ -133,9 +176,11 @@ class ManicTimeApiClient(private val prefs: ManicTimePreferences) {
             
             if (schemaName == "ManicTime/Tags") {
                 val timelineKey = timeline.getString("timelineKey")
-                val lastChangeId = timeline.optString("lastChangeId", null)
+                val lastChangeId = if (timeline.has("lastChangeId")) timeline.getString("lastChangeId") else null
+                val homeEnv = timeline.getJSONObject("homeEnvironment")
+                val environmentId = homeEnv.getString("environmentId")
                 Log.d(TAG, "找到Tags timeline: $timelineKey")
-                return@withContext Pair(timelineKey, lastChangeId)
+                return@withContext Triple(timelineKey, lastChangeId, environmentId)
             }
         }
         
@@ -143,11 +188,13 @@ class ManicTimeApiClient(private val prefs: ManicTimePreferences) {
         if (timelines.length() > 0) {
             val firstTimeline = timelines.getJSONObject(0)
             val timelineKey = firstTimeline.getString("timelineKey")
-            val lastChangeId = firstTimeline.optString("lastChangeId", null)
+            val lastChangeId = if (firstTimeline.has("lastChangeId")) firstTimeline.getString("lastChangeId") else null
+            val homeEnv = firstTimeline.getJSONObject("homeEnvironment")
+            val environmentId = homeEnv.getString("environmentId")
             val schema = firstTimeline.getJSONObject("schema")
             val schemaName = schema.getString("name")
             Log.d(TAG, "使用第一个timeline: $timelineKey (类型: $schemaName)")
-            return@withContext Pair(timelineKey, lastChangeId)
+            return@withContext Triple(timelineKey, lastChangeId, environmentId)
         }
         
         throw Exception("未找到可用的Timeline")
@@ -159,6 +206,7 @@ class ManicTimeApiClient(private val prefs: ManicTimePreferences) {
     suspend fun uploadActivities(
         timelineKey: String,
         lastChangeId: String?,
+        environmentId: String,
         activities: List<ActivityRecord>
     ) = withContext(Dispatchers.IO) {
         // 确保serverUrl不以/结尾
@@ -174,9 +222,6 @@ class ManicTimeApiClient(private val prefs: ManicTimePreferences) {
                 put("Version", "1.0.0.0")
             })
         }
-        
-        // 生成环境ID（使用设备UUID）
-        val environmentId = prefs.deviceUUID
         
         // 构建Changes数组
         val changesArray = JSONArray()
