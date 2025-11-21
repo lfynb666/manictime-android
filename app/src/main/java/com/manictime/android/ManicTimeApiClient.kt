@@ -238,6 +238,7 @@ class ManicTimeApiClient(private val prefs: ManicTimePreferences) {
                     put("ChangeType", "Create")
                     put("EntityId", groupEntityId)
                     put("EntityType", "group")
+                    put("OldValues", JSONObject.NULL)
                     put("NewValues", JSONObject().apply {
                         put("groupId", activity.packageName)
                         put("displayName", activity.appName)
@@ -259,6 +260,7 @@ class ManicTimeApiClient(private val prefs: ManicTimePreferences) {
                 put("ChangeType", "Create")
                 put("EntityId", activityEntityId)
                 put("EntityType", "activity")
+                put("OldValues", JSONObject.NULL)
                 put("NewValues", JSONObject().apply {
                     put("groupId", groupsMap[activity.packageName])
                     put("isActive", false)
