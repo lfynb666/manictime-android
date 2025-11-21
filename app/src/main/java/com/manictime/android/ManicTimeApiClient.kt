@@ -69,8 +69,9 @@ class ManicTimeApiClient(private val prefs: ManicTimePreferences) {
     
     /**
      * 获取或创建当前设备的Timeline
+     * 返回: Pair(timelineKey, lastChangeId)
      */
-    suspend fun getOrCreateTimeline(): String = withContext(Dispatchers.IO) {
+    suspend fun getOrCreateTimeline(): Pair<String, String?> = withContext(Dispatchers.IO) {
         // 1. 获取所有timeline
         val timelinesUrl = "${prefs.serverUrl}/api/timelines"
         val response = get(timelinesUrl)
@@ -104,8 +105,9 @@ class ManicTimeApiClient(private val prefs: ManicTimePreferences) {
             // 优先查找Applications类型的timeline
             if (schemaName == "ManicTime/Applications") {
                 val timelineKey = timeline.getString("timelineKey")
-                Log.d(TAG, "使用Applications timeline: $timelineKey")
-                return@withContext timelineKey
+                val lastChangeId = timeline.optString("lastChangeId", null)
+                Log.d(TAG, "使用Applications timeline: $timelineKey, lastChangeId: $lastChangeId")
+                return@withContext Pair(timelineKey, lastChangeId)
             }
         }
         
@@ -117,8 +119,9 @@ class ManicTimeApiClient(private val prefs: ManicTimePreferences) {
             
             if (schemaName.contains("Computer usage", ignoreCase = true)) {
                 val timelineKey = timeline.getString("timelineKey")
+                val lastChangeId = timeline.optString("lastChangeId", null)
                 Log.d(TAG, "使用Computer Usage timeline: $timelineKey")
-                return@withContext timelineKey
+                return@withContext Pair(timelineKey, lastChangeId)
             }
         }
         
@@ -130,8 +133,9 @@ class ManicTimeApiClient(private val prefs: ManicTimePreferences) {
             
             if (schemaName == "ManicTime/Tags") {
                 val timelineKey = timeline.getString("timelineKey")
+                val lastChangeId = timeline.optString("lastChangeId", null)
                 Log.d(TAG, "找到Tags timeline: $timelineKey")
-                return@withContext timelineKey
+                return@withContext Pair(timelineKey, lastChangeId)
             }
         }
         
@@ -139,10 +143,11 @@ class ManicTimeApiClient(private val prefs: ManicTimePreferences) {
         if (timelines.length() > 0) {
             val firstTimeline = timelines.getJSONObject(0)
             val timelineKey = firstTimeline.getString("timelineKey")
+            val lastChangeId = firstTimeline.optString("lastChangeId", null)
             val schema = firstTimeline.getJSONObject("schema")
             val schemaName = schema.getString("name")
             Log.d(TAG, "使用第一个timeline: $timelineKey (类型: $schemaName)")
-            return@withContext timelineKey
+            return@withContext Pair(timelineKey, lastChangeId)
         }
         
         throw Exception("未找到可用的Timeline")
@@ -153,6 +158,7 @@ class ManicTimeApiClient(private val prefs: ManicTimePreferences) {
      */
     suspend fun uploadActivities(
         timelineKey: String,
+        lastChangeId: String?,
         activities: List<ActivityRecord>
     ) = withContext(Dispatchers.IO) {
         // 确保serverUrl不以/结尾
@@ -223,7 +229,7 @@ class ManicTimeApiClient(private val prefs: ManicTimePreferences) {
         val json = JSONObject().apply {
             put("Schema", schema)
             put("ExpectedEnvironmentId", environmentId)
-            put("ExpectedLastChangeId", JSONObject.NULL)
+            put("ExpectedLastChangeId", lastChangeId ?: JSONObject.NULL)
             put("Changes", changesArray)
         }
         

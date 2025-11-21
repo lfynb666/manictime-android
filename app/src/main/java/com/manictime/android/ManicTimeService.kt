@@ -79,6 +79,7 @@ class ManicTimeService : Service() {
     
     // Timeline信息
     private var timelineKey: String? = null
+    private var lastChangeId: String? = null
     
     // 设备状态监听
     private var deviceStateReceiver: DeviceStateReceiver? = null
@@ -251,8 +252,10 @@ class ManicTimeService : Service() {
         serviceScope.launch {
             try {
                 AppLogger.i(TAG, "📊 获取Timeline...")
-                timelineKey = apiClient.getOrCreateTimeline()
-                Log.d(TAG, "Timeline Key: $timelineKey")
+                val (key, changeId) = apiClient.getOrCreateTimeline()
+                timelineKey = key
+                lastChangeId = changeId
+                Log.d(TAG, "Timeline Key: $timelineKey, LastChangeId: $lastChangeId")
                 AppLogger.i(TAG, "✅ Timeline获取成功: $timelineKey")
             } catch (e: Exception) {
                 Log.e(TAG, "获取timeline失败", e)
@@ -430,7 +433,7 @@ class ManicTimeService : Service() {
                 activityQueue.clear()
                 
                 // 批量上传（使用activityupdates API）
-                apiClient.uploadActivities(timelineKey!!, activities)
+                apiClient.uploadActivities(timelineKey, lastChangeId, activities)
                 
                 Log.d(TAG, "✅ 成功上传了 ${activities.size} 条活动记录")
                 AppLogger.i(TAG, "✅ 活动上传成功: ${activities.size} 条")
