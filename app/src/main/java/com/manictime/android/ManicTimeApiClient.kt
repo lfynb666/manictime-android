@@ -78,11 +78,12 @@ class ManicTimeApiClient(private val prefs: ManicTimePreferences) {
         val json = JSONObject(response)
         
         val timelines = json.getJSONArray("timelines")
-        val currentDeviceName = android.os.Build.MODEL
+        // 使用独特的设备名称，避免与现有设备冲突
+        val currentDeviceName = "${android.os.Build.MODEL}-Android"
         
         // 2. 打印所有timeline类型和links
         Log.d(TAG, "=== 可用的Timeline列表 ===")
-        AppLogger.i(TAG, "可用的Timeline列表 (当前设备MODEL: '$currentDeviceName'):")
+        AppLogger.i(TAG, "可用的Timeline列表 (当前设备MODEL: '$currentDeviceName'): ")
         for (i in 0 until timelines.length()) {
             val timeline = timelines.getJSONObject(i)
             val schema = timeline.getJSONObject("schema")
@@ -229,6 +230,11 @@ class ManicTimeApiClient(private val prefs: ManicTimePreferences) {
         Log.d(TAG, "服务器最大EntityId: $maxEntityId")
         AppLogger.i(TAG, "服务器最大EntityId: $maxEntityId，新EntityId从${maxEntityId + 1}开始")
         
+        // 1. 先查询timeline中已有的groups
+        val existingGroups = getExistingGroups(timelineKey)
+        Log.d(TAG, "已存在的groups: ${existingGroups.size} 个")
+        AppLogger.i(TAG, "已存在的groups: ${existingGroups.size} 个")
+        
         // 构建Schema
         val schema = JSONObject().apply {
             put("Name", "ManicTime/Applications")
@@ -242,27 +248,37 @@ class ManicTimeApiClient(private val prefs: ManicTimePreferences) {
         // 构建Changes数组
         val changesArray = JSONArray()
         
-        // 先添加groups
+        // 2. 构建groupsMap：复用已存在的group，或创建新的
         val groupsMap = mutableMapOf<String, Int>()
-        // 从最大EntityId+1开始
         var groupEntityId = maxEntityId + 1
         val random = java.util.Random()
+        
         activities.forEach { activity ->
             if (!groupsMap.containsKey(activity.packageName)) {
-                groupsMap[activity.packageName] = groupEntityId
-                changesArray.put(JSONObject().apply {
-                    put("ChangeId", "${groupEntityId},${random.nextInt(Int.MAX_VALUE)}")
-                    put("ChangeType", "Create")
-                    put("EntityId", groupEntityId)
-                    put("EntityType", "group")
-                    put("OldValues", JSONObject())
-                    put("NewValues", JSONObject().apply {
-                        put("groupId", activity.packageName)
-                        put("displayName", activity.appName)
-                        put("color", generateColorForPackage(activity.packageName))
+                // 检查是否已存在该packageName的group
+                val existingGroupId = existingGroups[activity.packageName]
+                if (existingGroupId != null) {
+                    // 复用已存在的group
+                    groupsMap[activity.packageName] = existingGroupId
+                    Log.d(TAG, "复用已存在的group: ${activity.packageName} -> $existingGroupId")
+                } else {
+                    // 创建新的group
+                    groupsMap[activity.packageName] = groupEntityId
+                    changesArray.put(JSONObject().apply {
+                        put("ChangeId", "${groupEntityId},${random.nextInt(Int.MAX_VALUE)}")
+                        put("ChangeType", "Create")
+                        put("EntityId", groupEntityId)
+                        put("EntityType", "group")
+                        put("OldValues", JSONObject())
+                        put("NewValues", JSONObject().apply {
+                            put("groupId", activity.packageName)
+                            put("displayName", activity.appName)
+                            put("color", generateColorForPackage(activity.packageName))
+                        })
                     })
-                })
-                groupEntityId++
+                    Log.d(TAG, "创建新group: ${activity.packageName} -> $groupEntityId")
+                    groupEntityId++
+                }
             }
         }
         
@@ -324,6 +340,34 @@ class ManicTimeApiClient(private val prefs: ManicTimePreferences) {
         val g = (hash and 0x00FF00) shr 8
         val b = hash and 0x0000FF
         return String.format("%02X%02X%02X", r, g, b)
+    }
+    
+    /**
+     * 获取timeline中已存在的groups
+     * 返回: Map<packageName, entityId>
+     */
+    private suspend fun getExistingGroups(timelineKey: String): Map<String, Int> = withContext(Dispatchers.IO) {
+        try {
+            val baseUrl = prefs.serverUrl.trimEnd('/')
+            val url = "$baseUrl/api/timelines/$timelineKey/groups"
+            val response = get(url)
+            val json = JSONObject(response)
+            
+            val groupsMap = mutableMapOf<String, Int>()
+            if (json.has("groups")) {
+                val groups = json.getJSONArray("groups")
+                for (i in 0 until groups.length()) {
+                    val group = groups.getJSONObject(i)
+                    val entityId = group.getInt("entityId")
+                    val groupId = group.getString("groupId")
+                    groupsMap[groupId] = entityId
+                }
+            }
+            groupsMap
+        } catch (e: Exception) {
+            Log.e(TAG, "获取已存在的groups失败", e)
+            emptyMap()
+        }
     }
     
     // ========== HTTP辅助方法 ==========
