@@ -81,12 +81,14 @@ class ManicTimeApiClient(private val prefs: ManicTimePreferences) {
         
         // 2. 打印所有timeline类型
         Log.d(TAG, "=== 可用的Timeline列表 ===")
+        AppLogger.i(TAG, "📋 可用的Timeline列表:")
         for (i in 0 until timelines.length()) {
             val timeline = timelines.getJSONObject(i)
             val schema = timeline.getJSONObject("schema")
             val schemaName = schema.getString("name")
             val timelineKey = timeline.getString("timelineKey")
             Log.d(TAG, "Timeline $i: $schemaName -> $timelineKey")
+            AppLogger.i(TAG, "  [$i] $schemaName -> $timelineKey")
         }
         
         // 3. 查找Applications timeline (用于应用使用记录)
@@ -204,6 +206,7 @@ class ManicTimeApiClient(private val prefs: ManicTimePreferences) {
         Log.d(TAG, "请求体: ${json.toString(2)}")
         AppLogger.i(TAG, "📤 上传URL: $url")
         AppLogger.i(TAG, "📦 请求体大小: ${json.toString().length} 字节")
+        AppLogger.i(TAG, "📝 请求体内容:\n${json.toString(2)}")
         
         try {
             post(url, json.toString(), CONTENT_TYPE_JSON)
@@ -381,20 +384,25 @@ class ManicTimeApiClient(private val prefs: ManicTimePreferences) {
             val responseCode = connection.responseCode
             val responseMessage = connection.responseMessage
             Log.d(TAG, "POST $urlString -> $responseCode $responseMessage")
+            AppLogger.i(TAG, "📡 响应状态: $responseCode $responseMessage")
             
             if (responseCode == HttpURLConnection.HTTP_OK || 
                 responseCode == HttpURLConnection.HTTP_CREATED) {
-                return readResponse(connection)
+                val response = readResponse(connection)
+                AppLogger.i(TAG, "✅ 响应成功，长度: ${response.length}")
+                return response
             } else {
                 val error = readErrorResponse(connection)
                 Log.e(TAG, "POST失败 $responseCode: $error")
+                AppLogger.e(TAG, "❌ HTTP $responseCode: $responseMessage")
+                AppLogger.e(TAG, "📄 错误响应: ${error.take(500)}") // 只取前500字符
                 
                 // 特殊处理502错误
                 if (responseCode == HttpURLConnection.HTTP_BAD_GATEWAY) {
                     throw Exception("服务器网关错误(502)，请检查ManicTime Server是否正常运行")
                 }
                 
-                throw Exception("HTTP $responseCode $responseMessage: $error")
+                throw Exception("HTTP $responseCode $responseMessage: ${error.take(200)}")
             }
         } finally {
             connection.disconnect()
