@@ -26,8 +26,8 @@ class ManicTimeApiClient(private val prefs: ManicTimePreferences) {
         const val CONTENT_TYPE_JSON = "application/vnd.manictime.v3+json"
         const val CONTENT_TYPE_FORM = "application/x-www-form-urlencoded"
         
-        // ISO 8601日期格式
-        private val dateFormat = SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss.SSSXXX", Locale.US).apply {
+        // ISO 8601日期格式 (不含毫秒，与ManicTime Server兼容)
+        private val dateFormat = SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ssXXX", Locale.US).apply {
             timeZone = TimeZone.getDefault()
         }
     }
@@ -81,7 +81,7 @@ class ManicTimeApiClient(private val prefs: ManicTimePreferences) {
         
         // 2. 打印所有timeline类型
         Log.d(TAG, "=== 可用的Timeline列表 ===")
-        AppLogger.i(TAG, "📋 可用的Timeline列表:")
+        AppLogger.i(TAG, "可用的Timeline列表:")
         for (i in 0 until timelines.length()) {
             val timeline = timelines.getJSONObject(i)
             val schema = timeline.getJSONObject("schema")
@@ -100,7 +100,7 @@ class ManicTimeApiClient(private val prefs: ManicTimePreferences) {
             // 优先查找Applications类型的timeline
             if (schemaName == "ManicTime/Applications") {
                 val timelineKey = timeline.getString("timelineKey")
-                Log.d(TAG, "✅ 使用Applications timeline: $timelineKey")
+                Log.d(TAG, "使用Applications timeline: $timelineKey")
                 return@withContext timelineKey
             }
         }
@@ -113,7 +113,7 @@ class ManicTimeApiClient(private val prefs: ManicTimePreferences) {
             
             if (schemaName.contains("Computer usage", ignoreCase = true)) {
                 val timelineKey = timeline.getString("timelineKey")
-                Log.d(TAG, "✅ 使用Computer Usage timeline: $timelineKey")
+                Log.d(TAG, "使用Computer Usage timeline: $timelineKey")
                 return@withContext timelineKey
             }
         }
@@ -151,7 +151,9 @@ class ManicTimeApiClient(private val prefs: ManicTimePreferences) {
         timelineKey: String,
         activities: List<ActivityRecord>
     ) = withContext(Dispatchers.IO) {
-        val url = "${prefs.serverUrl}/api/timelines/$timelineKey/activityupdates"
+        // 确保serverUrl不以/结尾
+        val baseUrl = prefs.serverUrl.trimEnd('/')
+        val url = "$baseUrl/api/timelines/$timelineKey/activityupdates"
         
         // 构建ClientEnvironment
         val clientEnvironment = JSONObject().apply {
@@ -204,15 +206,16 @@ class ManicTimeApiClient(private val prefs: ManicTimePreferences) {
         
         Log.d(TAG, "上传 ${activities.size} 条活动记录")
         Log.d(TAG, "请求体: ${json.toString(2)}")
-        AppLogger.i(TAG, "📤 上传URL: $url")
-        AppLogger.i(TAG, "📦 请求体大小: ${json.toString().length} 字节")
-        AppLogger.i(TAG, "📝 请求体内容:\n${json.toString(2)}")
+        AppLogger.i(TAG, "上传URL: $url")
+        AppLogger.i(TAG, "请求体大小: ${json.toString().length} 字节")
+        AppLogger.i(TAG, "Headers: Content-Type=$CONTENT_TYPE_JSON, Accept=$ACCEPT_HEADER")
+        AppLogger.i(TAG, "请求体内容:\n${json.toString(2)}")
         
         try {
             post(url, json.toString(), CONTENT_TYPE_JSON)
-            AppLogger.i(TAG, "✅ 活动上传API调用成功")
+            AppLogger.i(TAG, "活动上传API调用成功")
         } catch (e: Exception) {
-            AppLogger.e(TAG, "❌ 活动上传API失败", e)
+            AppLogger.e(TAG, "活动上传API失败", e)
             throw e
         }
     }
@@ -226,97 +229,6 @@ class ManicTimeApiClient(private val prefs: ManicTimePreferences) {
         val g = (hash and 0x00FF00) shr 8
         val b = hash and 0x0000FF
         return String.format("%02X%02X%02X", r, g, b)
-    }
-    
-    // 截图上传已移至 ScreenshotUploader.kt，通过SFTP直接上传到服务器文件系统
-    
-    /**
-     * 创建标签活动
-     */
-    suspend fun createTag(
-        timelineKey: String,
-        tagName: String,
-        startTime: Long,
-        duration: Long,
-        notes: String? = null
-    ) = withContext(Dispatchers.IO) {
-        val url = "${prefs.serverUrl}/api/timelines/$timelineKey/activities"
-        
-        val startTimeStr = dateFormat.format(Date(startTime))
-        
-        val json = JSONObject().apply {
-            put("values", JSONObject().apply {
-                put("name", tagName)
-                if (notes != null) {
-                    put("notes", notes)
-                }
-                put("timeInterval", JSONObject().apply {
-                    put("start", startTimeStr)
-                    put("duration", duration.toInt())
-                })
-            })
-        }
-        
-        post(url, json.toString(), CONTENT_TYPE_JSON)
-    }
-    
-    /**
-     * 获取活动列表
-     */
-    suspend fun getActivities(
-        timelineKey: String,
-        fromTime: Date,
-        toTime: Date
-    ): List<Activity> = withContext(Dispatchers.IO) {
-        val fromStr = SimpleDateFormat("yyyy-MM-dd", Locale.US).format(fromTime)
-        val toStr = SimpleDateFormat("yyyy-MM-dd", Locale.US).format(toTime)
-        
-        val url = "${prefs.serverUrl}/api/timelines/$timelineKey/activities" +
-                "?fromTime=$fromStr&toTime=$toStr"
-        
-        val response = get(url)
-        val json = JSONObject(response)
-        
-        val activities = mutableListOf<Activity>()
-        val activitiesArray = json.optJSONArray("activities")
-        
-        if (activitiesArray != null) {
-            for (i in 0 until activitiesArray.length()) {
-                val activityObj = activitiesArray.getJSONObject(i)
-                val values = activityObj.getJSONObject("values")
-                val interval = values.getJSONObject("timeInterval")
-                
-                activities.add(Activity(
-                    name = values.optString("name", ""),
-                    notes = values.optString("notes", null),
-                    start = interval.getString("start"),
-                    duration = interval.getInt("duration")
-                ))
-            }
-        }
-        
-        activities
-    }
-    
-    /**
-     * 获取允许的标签组合
-     */
-    suspend fun getAllowedTags(): List<String> = withContext(Dispatchers.IO) {
-        val url = "${prefs.serverUrl}/api/tagcombinationlist"
-        
-        val response = get(url)
-        val json = JSONObject(response)
-        
-        val tags = mutableListOf<String>()
-        val tagArray = json.optJSONArray("tagCombinations")
-        
-        if (tagArray != null) {
-            for (i in 0 until tagArray.length()) {
-                tags.add(tagArray.getString(i))
-            }
-        }
-        
-        tags
     }
     
     // ========== HTTP辅助方法 ==========
@@ -367,6 +279,11 @@ class ManicTimeApiClient(private val prefs: ManicTimePreferences) {
             connection.doOutput = true
             connection.setRequestProperty("Accept", ACCEPT_HEADER)
             connection.setRequestProperty("Content-Type", contentType)
+            // 显式设置Host header，避免服务器解析错误
+            connection.setRequestProperty("Host", url.host + if (url.port != -1) ":${url.port}" else "")
+            // 添加ManicTime环境headers（与Windows客户端一致）
+            connection.setRequestProperty("Manictime-Env-Application", "ManicTime Android;1.0.0")
+            connection.setRequestProperty("Manictime-Env-Devicename", android.os.Build.MODEL)
             
             if (useAuth && prefs.accessToken.isNotEmpty()) {
                 connection.setRequestProperty("Authorization", "Bearer ${prefs.accessToken}")
