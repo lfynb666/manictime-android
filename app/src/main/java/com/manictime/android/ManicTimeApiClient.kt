@@ -109,8 +109,11 @@ class ManicTimeApiClient(private val prefs: ManicTimePreferences) {
                 val timelineKey = timeline.getString("timelineKey")
                 val lastChangeId = if (timeline.has("lastChangeId")) timeline.getString("lastChangeId") else null
                 val environmentId = homeEnv.getString("environmentId")
-                Log.d(TAG, "使用当前设备的Applications timeline: $timelineKey")
+                Log.d(TAG, "使用当前设备的Applications timeline: $timelineKey, lastChangeId: $lastChangeId")
                 AppLogger.i(TAG, "✅ 使用当前设备($currentDeviceName)的Applications timeline")
+                AppLogger.i(TAG, "   TimelineKey: $timelineKey")
+                AppLogger.i(TAG, "   LastChangeId: $lastChangeId")
+                AppLogger.i(TAG, "   EnvironmentId: $environmentId")
                 return@withContext Triple(timelineKey, lastChangeId, environmentId)
             }
         }
@@ -213,6 +216,19 @@ class ManicTimeApiClient(private val prefs: ManicTimePreferences) {
         val baseUrl = prefs.serverUrl.trimEnd('/')
         val url = "$baseUrl/api/timelines/$timelineKey/changes"
         
+        // 从lastChangeId中提取最大EntityId
+        val maxEntityId = if (lastChangeId != null) {
+            try {
+                lastChangeId.split(",")[0].toInt()
+            } catch (e: Exception) {
+                0
+            }
+        } else {
+            0
+        }
+        Log.d(TAG, "服务器最大EntityId: $maxEntityId")
+        AppLogger.i(TAG, "服务器最大EntityId: $maxEntityId，新EntityId从${maxEntityId + 1}开始")
+        
         // 构建Schema
         val schema = JSONObject().apply {
             put("Name", "ManicTime/Applications")
@@ -228,7 +244,8 @@ class ManicTimeApiClient(private val prefs: ManicTimePreferences) {
         
         // 先添加groups
         val groupsMap = mutableMapOf<String, Int>()
-        var groupEntityId = 1
+        // 从最大EntityId+1开始
+        var groupEntityId = maxEntityId + 1
         val random = java.util.Random()
         activities.forEach { activity ->
             if (!groupsMap.containsKey(activity.packageName)) {
@@ -250,7 +267,8 @@ class ManicTimeApiClient(private val prefs: ManicTimePreferences) {
         }
         
         // 再添加activities
-        var activityEntityId = 1000
+        // 从group之后继续编号
+        var activityEntityId = groupEntityId
         activities.forEach { activity ->
             val startTime = dateFormat.format(Date(activity.startTime))
             val duration = activity.duration
