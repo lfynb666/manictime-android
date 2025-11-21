@@ -229,11 +229,12 @@ class ManicTimeApiClient(private val prefs: ManicTimePreferences) {
         // 先添加groups
         val groupsMap = mutableMapOf<String, Int>()
         var groupEntityId = 1
+        val random = java.util.Random()
         activities.forEach { activity ->
             if (!groupsMap.containsKey(activity.packageName)) {
                 groupsMap[activity.packageName] = groupEntityId
                 changesArray.put(JSONObject().apply {
-                    put("ChangeId", "${groupEntityId},${System.currentTimeMillis()}")
+                    put("ChangeId", "${groupEntityId},${random.nextInt(Int.MAX_VALUE)}")
                     put("ChangeType", "Create")
                     put("EntityId", groupEntityId)
                     put("EntityType", "group")
@@ -254,7 +255,7 @@ class ManicTimeApiClient(private val prefs: ManicTimePreferences) {
             val duration = activity.duration
             
             changesArray.put(JSONObject().apply {
-                put("ChangeId", "${activityEntityId},${System.currentTimeMillis()}")
+                put("ChangeId", "${activityEntityId},${random.nextInt(Int.MAX_VALUE)}")
                 put("ChangeType", "Create")
                 put("EntityId", activityEntityId)
                 put("EntityType", "activity")
