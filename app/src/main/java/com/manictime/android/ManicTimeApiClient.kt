@@ -79,7 +79,7 @@ class ManicTimeApiClient(private val prefs: ManicTimePreferences) {
         val timelines = json.getJSONArray("timelines")
         val deviceName = "Android-${android.os.Build.MODEL}"
         
-        // 2. 打印所有timeline类型
+        // 2. 打印所有timeline类型和links
         Log.d(TAG, "=== 可用的Timeline列表 ===")
         AppLogger.i(TAG, "可用的Timeline列表:")
         for (i in 0 until timelines.length()) {
@@ -87,8 +87,12 @@ class ManicTimeApiClient(private val prefs: ManicTimePreferences) {
             val schema = timeline.getJSONObject("schema")
             val schemaName = schema.getString("name")
             val timelineKey = timeline.getString("timelineKey")
+            val links = timeline.optJSONObject("links")
             Log.d(TAG, "Timeline $i: $schemaName -> $timelineKey")
             AppLogger.i(TAG, "  [$i] $schemaName -> $timelineKey")
+            if (links != null) {
+                AppLogger.i(TAG, "      Links: ${links.keys().asSequence().toList()}")
+            }
         }
         
         // 3. 查找Applications timeline (用于应用使用记录)
@@ -145,7 +149,7 @@ class ManicTimeApiClient(private val prefs: ManicTimePreferences) {
     }
     
     /**
-     * 批量上传活动记录（使用activityupdates API）
+     * 批量上传活动记录（使用changes API）
      */
     suspend fun uploadActivities(
         timelineKey: String,
@@ -153,55 +157,74 @@ class ManicTimeApiClient(private val prefs: ManicTimePreferences) {
     ) = withContext(Dispatchers.IO) {
         // 确保serverUrl不以/结尾
         val baseUrl = prefs.serverUrl.trimEnd('/')
-        val url = "$baseUrl/api/timelines/$timelineKey/activityupdates"
+        val url = "$baseUrl/api/timelines/$timelineKey/changes"
         
-        // 构建ClientEnvironment
-        val clientEnvironment = JSONObject().apply {
-            put("applicationName", "ManicTime Android")
-            put("applicationVersion", "1.0.0")
-            put("databaseId", "android-${android.os.Build.MODEL}")
-            put("deviceName", "Android-${android.os.Build.MODEL}")
-            put("operatingSystem", "Android")
-            put("operatingSystemVersion", android.os.Build.VERSION.RELEASE)
+        // 构建Schema
+        val schema = JSONObject().apply {
+            put("Name", "ManicTime/Applications")
+            put("Version", "1.0.0.0")
+            put("BaseSchema", JSONObject().apply {
+                put("Name", "ManicTime/Generic/Group")
+                put("Version", "1.0.0.0")
+            })
         }
         
-        // 构建groups（按packageName去重）
-        val groupsMap = mutableMapOf<String, String>()
+        // 生成环境ID（使用设备UUID）
+        val environmentId = prefs.deviceUUID
+        
+        // 构建Changes数组
+        val changesArray = JSONArray()
+        
+        // 先添加groups
+        val groupsMap = mutableMapOf<String, Int>()
+        var groupEntityId = 1
         activities.forEach { activity ->
-            groupsMap[activity.packageName] = activity.appName
+            if (!groupsMap.containsKey(activity.packageName)) {
+                groupsMap[activity.packageName] = groupEntityId
+                changesArray.put(JSONObject().apply {
+                    put("ChangeId", "${groupEntityId},${System.currentTimeMillis()}")
+                    put("ChangeType", "Create")
+                    put("EntityId", groupEntityId)
+                    put("EntityType", "group")
+                    put("NewValues", JSONObject().apply {
+                        put("groupId", activity.packageName)
+                        put("displayName", activity.appName)
+                        put("color", generateColorForPackage(activity.packageName))
+                    })
+                })
+                groupEntityId++
+            }
         }
         
-        val groupsArray = JSONArray()
-        groupsMap.forEach { (packageName, appName) ->
-            groupsArray.put(JSONObject().apply {
-                put("groupId", packageName)
-                put("displayName", appName)
-                put("displayKey", packageName)
-                put("color", generateColorForPackage(packageName))
-                put("skipColor", false)
-            })
-        }
-        
-        // 构建activities
-        val activitiesArray = JSONArray()
-        activities.forEachIndexed { index, activity ->
+        // 再添加activities
+        var activityEntityId = 1000
+        activities.forEach { activity ->
             val startTime = dateFormat.format(Date(activity.startTime))
-            val endTime = dateFormat.format(Date(activity.startTime + activity.duration * 1000))
+            val duration = activity.duration
             
-            activitiesArray.put(JSONObject().apply {
-                put("activityId", "android_${activity.startTime}_$index")
-                put("displayName", activity.appName)
-                put("groupId", activity.packageName)
-                put("startTime", startTime)
-                put("endTime", endTime)
+            changesArray.put(JSONObject().apply {
+                put("ChangeId", "${activityEntityId},${System.currentTimeMillis()}")
+                put("ChangeType", "Create")
+                put("EntityId", activityEntityId)
+                put("EntityType", "activity")
+                put("NewValues", JSONObject().apply {
+                    put("groupId", groupsMap[activity.packageName])
+                    put("isActive", false)
+                    put("name", activity.appName)
+                    put("timeInterval", JSONObject().apply {
+                        put("start", startTime)
+                        put("duration", duration)
+                    })
+                })
             })
+            activityEntityId++
         }
         
         val json = JSONObject().apply {
-            put("clientEnvironment", clientEnvironment)
-            put("timelineKey", timelineKey)
-            put("groups", groupsArray)
-            put("activities", activitiesArray)
+            put("Schema", schema)
+            put("ExpectedEnvironmentId", environmentId)
+            put("ExpectedLastChangeId", JSONObject.NULL)
+            put("Changes", changesArray)
         }
         
         Log.d(TAG, "上传 ${activities.size} 条活动记录")
